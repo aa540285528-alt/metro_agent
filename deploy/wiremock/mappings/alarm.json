@@ -1,0 +1,312 @@
+{
+  "mappings":[
+  {
+    "priority": 1,
+    "request":{
+      "method": "GET",
+      "urlPath": "/api/alarms",
+      "queryParameters": {
+        "line": { "equalTo": "11" },
+        "station": { "equalTo": "赤沙站" },
+        "system": { "equalTo": "集中告警" }
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": { "Content-Type": "application/json" },
+      "jsonBody": [
+        {
+          "alarm_id": "A2026002",
+          "line": "11",
+          "station": "赤沙站",
+          "system": "集中告警",
+          "device_id": "NMS-11-CS-01",
+          "level": "紧急",
+          "message": "子系统接口服务器协议连接中断",
+          "status": "active"
+        }
+      ]
+    }
+  },
+  {
+    "priority": 1,
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/alarms",
+      "queryParameters": {
+        "line": { "equalTo": "11" },
+        "station": { "equalTo": "天河公园站" },
+        "system": { "equalTo": "无线" }
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": { "Content-Type": "application/json" },
+      "jsonBody": [
+        {
+          "alarm_id": "A2026003",
+          "line": "11",
+          "station": "天河公园站",
+          "system": "无线",
+          "device_id": "TETRA-11-TH-02",
+          "level": "重要",
+          "message": "基站载频板收发链路丢包率超限",
+          "status": "active"
+        }
+      ]
+    }
+  },
+  {
+    "priority": 1,
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/alarms",
+      "queryParameters": {
+        "line": { "equalTo": "11" },
+        "station": { "equalTo": "琶洲站" },
+        "system": { "equalTo": "骨干传输" }
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": { "Content-Type": "application/json" },
+      "jsonBody": [
+        {
+          "alarm_id": "A2026004",
+          "line": "11",
+          "station": "琶洲站",
+          "system": "骨干传输",
+          "device_id": "OTN-11-PZ-01",
+          "level": "紧急",
+          "message": "主用光纤环路光功率严重衰减故障",
+          "status": "active"
+        }
+      ]
+    }
+  },
+  {
+    "priority": 1,
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/alarms",
+      "queryParameters": {
+        "line": { "equalTo": "11" },
+        "station": { "equalTo": "广州火车站" },
+        "system": { "equalTo": "线路传输" }
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": { "Content-Type": "application/json" },
+      "jsonBody": [
+        {
+          "alarm_id": "A2026005",
+          "line": "11",
+          "station": "广州火车站",
+          "system": "线路传输",
+          "device_id": "SDH-11-GZ-01",
+          "level": "次要",
+          "message": "传输板卡误码越限告警",
+          "status": "active"
+        }
+      ]
+    }
+  },
+  {
+    "priority": 1,
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/alarms",
+      "queryParameters": {
+        "line": { "equalTo": "11" },
+        "station": { "equalTo": "大塘站" },
+        "system": { "equalTo": "广播" }
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": { "Content-Type": "application/json" },
+      "jsonBody": [
+        {
+          "alarm_id": "A2026006",
+          "line": "11",
+          "station": "大塘站",
+          "system": "广播",
+          "device_id": "PA-11-DT-AMP03",
+          "level": "次要",
+          "message": "站台广播功放模块过载保护故障",
+          "status": "active"
+        }
+      ]
+    }
+  },
+  {
+    "priority": 1,
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/alarms",
+      "queryParameters": {
+        "line": { "equalTo": "11" },
+        "station": { "equalTo": "鹤洞东站" },
+        "system": { "equalTo": "CCTV" }
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": { "Content-Type": "application/json" },
+      "jsonBody": [
+        {
+          "alarm_id": "A2026007",
+          "line": "11",
+          "station": "鹤洞东站",
+          "system": "CCTV",
+          "device_id": "CCTV-11-HD-CAM015",
+          "level": "提示",
+          "message": "站厅球机视频流丢失或离线",
+          "status": "active"
+        }
+      ]
+    }
+  },
+  {
+    "priority": 1,
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/alarms",
+      "queryParameters": {
+        "line": { "equalTo": "11" },
+        "station": { "equalTo": "沙河站" },
+        "system": { "equalTo": "PIDS" }
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": { "Content-Type": "application/json" },
+      "jsonBody": [
+        {
+          "alarm_id": "A2026008",
+          "line": "11",
+          "station": "沙河站",
+          "system": "PIDS",
+          "device_id": "PIDS-11-SH-CONT01",
+          "level": "重要",
+          "message": "站台LED列车信息播控机无响应",
+          "status": "active"
+        }
+      ]
+    }
+  },
+  {
+    "priority": 1,
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/alarms",
+      "queryParameters": {
+        "line": { "equalTo": "11" },
+        "station": { "equalTo": "中山八站" },
+        "system": { "equalTo": "专用电话" }
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": { "Content-Type": "application/json" },
+      "jsonBody": [
+        {
+          "alarm_id": "A2026009",
+          "line": "11",
+          "station": "中山八站",
+          "system": "专用电话",
+          "device_id": "TEL-11-ZS-IXP01",
+          "level": "重要",
+          "message": "专用调度电话交换机数字中继板故障",
+          "status": "active"
+        }
+      ]
+    }
+  },
+  {
+    "priority": 1,
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/alarms",
+      "queryParameters": {
+        "line": { "equalTo": "11" },
+        "station": { "equalTo": "石围塘站" },
+        "system": { "equalTo": "公务电话" }
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": { "Content-Type": "application/json" },
+      "jsonBody": [
+        {
+          "alarm_id": "A2026010",
+          "line": "11",
+          "station": "石围塘站",
+          "system": "公务电话",
+          "device_id": "IPPBX-11-SW-01",
+          "level": "提示",
+          "message": "IPPBX与远端网关会话超时",
+          "status": "active"
+        }
+      ]
+    }
+  },
+  {
+    "priority": 1,
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/alarms",
+      "queryParameters": {
+        "line": { "equalTo": "11" },
+        "station": { "equalTo": "赤沙站" },
+        "system": { "equalTo": "电源" }
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": { "Content-Type": "application/json" },
+      "jsonBody": [
+        {
+          "alarm_id": "A2026011",
+          "line": "11",
+          "station": "赤沙站",
+          "system": "电源",
+          "device_id": "UPS-11-CS-02",
+          "level": "紧急",
+          "message": "通信UPS整流器故障，蓄电池开始放电",
+          "status": "active"
+        }
+      ]
+    }
+  },
+  {
+    "priority": 1,
+    "request": {
+      "method": "GET",
+      "urlPath": "/api/alarms",
+      "queryParameters": {
+        "line": { "equalTo": "11" },
+        "station": { "equalTo": "芳村站" },
+        "system": { "equalTo": "安防" }
+      }
+    },
+    "response": {
+      "status": 200,
+      "headers": { "Content-Type": "application/json" },
+      "jsonBody": [
+        {
+          "alarm_id": "A2026012",
+          "line": "11",
+          "station": "芳村站",
+          "system": "安防",
+          "device_id": "ACS-11-FC-01",
+          "level": "次要",
+          "message": "通信机房门禁控制器通信异常",
+          "status": "active"
+        }
+      ]
+    }
+  }
+]
+}

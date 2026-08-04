@@ -24,7 +24,7 @@ def test_private_runtime_directories_are_not_in_repository() -> None:
         "chroma_db",
         "memory_chroma_db",
         "resumes",
-        "相关材料",
+        "鐩稿叧鏉愭枡",
     }
 
     assert not (private_directories & {entry.name for entry in ROOT.iterdir()})
