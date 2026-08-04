@@ -4,7 +4,6 @@ from typing import Any, Mapping
 
 from metro_agent.observability.finalize_node import get_trace_registry
 from metro_agent.observability.agent_usage import LLM_USAGE_RECORDS_KEY
-from metro_agent.observability.llm_usage import record_llm_usage
 from metro_agent.planning.agent_adapter import run_plan_step_agent
 from metro_agent.planning.factory import create_event
 from metro_agent.planning.models import PlanStep, StepError, StepResult, utc_now_iso

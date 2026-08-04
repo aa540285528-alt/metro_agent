@@ -597,15 +597,12 @@ class TraceRecorder:
                 if span_persisted:
                     self._known_span_ids.add(event.span_id)
                 for observation in span.observations:
-                    persisted = (
+                    if span_persisted:
                         self._call_store(
                             observation.operation,
                             getattr(self.store, observation.operation),
                             observation.values,
                         )
-                        if span_persisted
-                        else False
-                    )
                     if observation.operation == "append_llm_usage":
                         self._recorded_llm_usages.append(dict(observation.values))
                         self._total_tokens += observation.values["total_tokens"]

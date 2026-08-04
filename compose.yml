@@ -1,0 +1,27 @@
+services:
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://metro_agent:${POSTGRES_PASSWORD:-CHANGE_ME}@postgres:5432/metro_agent
+      SHORT_TERM_MEMORY_REDIS_URL: redis://redis:6379
+      WIREMOCK_BASE_URL: http://wiremock:8080
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on: [postgres, redis]
+  redis:
+    image: redis:7-alpine
+    ports: ["127.0.0.1:6379:6379"]
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: metro_agent
+      POSTGRES_USER: metro_agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+  wiremock:
+    image: wiremock/wiremock:3.13.2
+    profiles: ["mock"]
+    ports: ["127.0.0.1:8080:8080"]
+    volumes: [./deploy/wiremock/mappings:/home/wiremock/mappings:ro]
+volumes:
+  postgres_data:

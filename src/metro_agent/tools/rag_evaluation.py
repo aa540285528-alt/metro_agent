@@ -240,7 +240,6 @@ def evaluate_rows(
         }
         for category, total in sorted(category_totals.items())
     }
-    hit_count = sum(rank is not None for rank in rag_ranks)
     reciprocal_ranks = [1 / rank if rank is not None else 0.0 for rank in rag_ranks]
     return {
         "total_rows": len(golden_rows),

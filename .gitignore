@@ -3,6 +3,7 @@
 !.env.example
 .venv/
 .venv-*/
+src/metro_agent.egg-info/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -16,4 +17,3 @@ memory_chroma_db/
 *.db
 *.sqlite3
 *.log
-

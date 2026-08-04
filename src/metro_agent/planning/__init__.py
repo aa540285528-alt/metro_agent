@@ -90,6 +90,7 @@ __all__ = [
     "plan_validator_node",
     "route_ready_steps",
     "planning_worker_node",
+    "extract_step_output",
     "planning_aggregate_node",
     "planning_debug_end_node",
     # —— 调度器 ——

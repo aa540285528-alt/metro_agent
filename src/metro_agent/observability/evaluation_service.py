@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from metro_agent.observability.artifacts import ArtifactRef, write_json, write_jsonl, write_markdown
+from metro_agent.observability.artifacts import write_json, write_jsonl, write_markdown
 from metro_agent.observability.models import EvalCaseResult, EvalRun
 
 

@@ -20,7 +20,6 @@ from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from metro_agent.config import (
     MEMORY_CHROMA_DB_DIR,
     MEMORY_COLLECTION_NAME,
-    MEMORY_EMBED_MODEL_PATH,
 )
 from metro_agent.memory.long_term.models import MemoryRecord
 from metro_agent.config import EMBEDDING_MODEL
