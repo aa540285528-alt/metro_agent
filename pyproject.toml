@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "metro-agent"
+version = "0.1.0"
+description = "A multi-agent assistant for metro communication operations"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "Metro Agent contributors" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = []
+evaluation = []
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
