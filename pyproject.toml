@@ -42,6 +42,10 @@ metro_agent = ["static/*.html", "static/*.css", "static/fonts/*.woff2"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+  "integration: requires dedicated backing services and never targets production data",
+  "live: calls live model or external service providers",
+]
 
 [tool.ruff.lint]
 # Preserve the legacy code style while CI blocks syntax and undefined-name defects.

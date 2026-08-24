@@ -1,27 +1,118 @@
 services:
   app:
+    image: metro-agent:${METRO_AGENT_IMAGE_TAG:-local}
     build: .
     environment:
-      DATABASE_URL: postgresql+psycopg://metro_agent:${POSTGRES_PASSWORD:-CHANGE_ME}@postgres:5432/metro_agent
+      DATABASE_URL: "postgresql+psycopg://metro_agent:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/metro_agent"
+      AUTH_DATABASE_URL: "mysql+pymysql://metro_auth:${AUTH_MYSQL_PASSWORD:?请在 .env 中设置 AUTH_MYSQL_PASSWORD}@mysql:3306/metro_auth"
+      AUTH_SESSION_PEPPER: "${AUTH_SESSION_PEPPER:?请在 .env 中设置 AUTH_SESSION_PEPPER}"
+      AUTH_COOKIE_SECURE: "${AUTH_COOKIE_SECURE:-false}"
+      AUTH_SESSION_TTL_SECONDS: "${AUTH_SESSION_TTL_SECONDS:-28800}"
       SHORT_TERM_MEMORY_REDIS_URL: redis://redis:6379
       WIREMOCK_BASE_URL: http://wiremock:8080
-    ports: ["127.0.0.1:8000:8000"]
-    depends_on: [postgres, redis]
-  redis:
-    image: redis:7-alpine
-    ports: ["127.0.0.1:6379:6379"]
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      DEEPSEEK_BASE_URL: "${DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
+      GLM_API_KEY: "${GLM_API_KEY:-}"
+      GLM_API_URL: "${GLM_API_URL:-}"
+      DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:-}"
+      DASHSCOPE_BASE_URL: "${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
+      OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://host.docker.internal:11434}"
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+      auth-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  db-migrate:
+    image: metro-agent:${METRO_AGENT_IMAGE_TAG:-local}
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: "postgresql+psycopg://metro_agent:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/metro_agent"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  auth-migrate:
+    image: metro-agent:${METRO_AGENT_IMAGE_TAG:-local}
+    command: ["alembic", "-c", "alembic-auth.ini", "upgrade", "head"]
+    environment:
+      AUTH_DATABASE_URL: "mysql+pymysql://metro_auth:${AUTH_MYSQL_PASSWORD:?请在 .env 中设置 AUTH_MYSQL_PASSWORD}@mysql:3306/metro_auth"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: "no"
+
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: metro_agent
       POSTGRES_USER: metro_agent
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME}
-    ports: ["127.0.0.1:5432:5432"]
-    volumes: [postgres_data:/var/lib/postgresql/data]
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metro_agent -d metro_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    environment:
+      MYSQL_DATABASE: metro_auth
+      MYSQL_USER: metro_auth
+      MYSQL_PASSWORD: "${AUTH_MYSQL_PASSWORD:?请在 .env 中设置 AUTH_MYSQL_PASSWORD}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD:?请在 .env 中设置 MYSQL_ROOT_PASSWORD}"
+      TZ: UTC
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'mysqladmin ping -h 127.0.0.1 -u"$$MYSQL_USER" --password="$$MYSQL_PASSWORD" --silent'
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   wiremock:
     image: wiremock/wiremock:3.13.2
     profiles: ["mock"]
-    ports: ["127.0.0.1:8080:8080"]
-    volumes: [./deploy/wiremock/mappings:/home/wiremock/mappings:ro]
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./deploy/wiremock/mappings:/home/wiremock/mappings:ro
+
 volumes:
   postgres_data:
+  mysql_data:
