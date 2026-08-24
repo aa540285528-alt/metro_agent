@@ -8,102 +8,7 @@
 <link href="https://fonts.googleapis.com" rel="preconnect"/>
 <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;family=Geist:wght@400;500&amp;display=swap" rel="stylesheet"/>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<script id="tailwind-config">
-        try {
-            tailwind.config = {
-                darkMode: "class",
-                theme: {
-                    extend: {
-                        "colors": {
-                            "tertiary": "#3d4144",
-                            "on-secondary-fixed-variant": "#454748",
-                            "primary-fixed-dim": "#bcc3ff",
-                            "surface-bright": "#f9f9ff",
-                            "tertiary-container": "#55585b",
-                            "surface-variant": "#dce2f7",
-                            "inverse-on-surface": "#edf0ff",
-                            "surface-container-lowest": "#ffffff",
-                            "on-secondary-fixed": "#191c1d",
-                            "surface-dim": "#d3daef",
-                            "on-tertiary-fixed": "#191c1f",
-                            "on-primary-fixed": "#000d60",
-                            "outline-variant": "#c4c5da",
-                            "tertiary-fixed": "#e0e2e6",
-                            "primary-fixed": "#dfe0ff",
-                            "on-secondary": "#ffffff",
-                            "error": "#ba1a1a",
-                            "inverse-surface": "#293040",
-                            "surface-tint": "#1f41ff",
-                            "error-container": "#ffdad6",
-                            "tertiary-fixed-dim": "#c4c7ca",
-                            "secondary-fixed-dim": "#c5c7c8",
-                            "on-surface": "#141b2b",
-                            "background": "#f9f9ff",
-                            "outline": "#747689",
-                            "surface-container": "#e9edff",
-                            "secondary-container": "#e1e3e4",
-                            "inverse-primary": "#bcc3ff",
-                            "surface-container-highest": "#dce2f7",
-                            "surface-container-high": "#e1e8fd",
-                            "on-tertiary-container": "#ccced2",
-                            "surface-container-low": "#f1f3ff",
-                            "on-surface-variant": "#444657",
-                            "on-tertiary-fixed-variant": "#44474a",
-                            "on-tertiary": "#ffffff",
-                            "on-secondary-container": "#626566",
-                            "on-primary": "#ffffff",
-                            "primary": "#0033ff",
-                            "on-error-container": "#93000a",
-                            "primary-container": "#0033ff",
-                            "secondary-fixed": "#e1e3e4",
-                            "on-background": "#141b2b",
-                            "surface": "#f9f9ff",
-                            "secondary": "#5c5f60",
-                            "on-primary-container": "#c5caff",
-                            "on-error": "#ffffff",
-                            "on-primary-fixed-variant": "#0029d3"
-                        },
-                        "borderRadius": {
-                            "DEFAULT": "0.25rem",
-                            "lg": "0.5rem",
-                            "xl": "0.75rem",
-                            "full": "9999px"
-                        },
-                        "spacing": {
-                            "gutter": "24px",
-                            "stack-sm": "8px",
-                            "chat-max": "800px",
-                            "stack-md": "16px",
-                            "margin-mobile": "16px",
-                            "stack-lg": "32px",
-                            "container-max": "1200px",
-                            "sidebar-expanded": "264px",
-                            "sidebar-collapsed": "64px"
-                        },
-                        "fontFamily": {
-                            "headline-lg-mobile": ["Inter"],
-                            "headline-lg": ["Inter"],
-                            "label-caps": ["Inter"],
-                            "body-md": ["Inter"],
-                            "code-sm": ["Geist"],
-                            "body-lg": ["Inter"],
-                            "headline-md": ["Inter"]
-                        },
-                        "fontSize": {
-                            "headline-lg-mobile": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
-                            "headline-lg": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "600" }],
-                            "label-caps": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600" }],
-                            "body-md": ["14px", { "lineHeight": "22px", "fontWeight": "400" }],
-                            "code-sm": ["13px", { "lineHeight": "20px", "fontWeight": "400" }],
-                            "body-lg": ["16px", { "lineHeight": "26px", "fontWeight": "400" }],
-                            "headline-md": ["20px", { "lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "500" }]
-                        }
-                    }
-                }
-            }
-        } catch (_e) {}
-    </script>
+<link href="/static/tailwind.css" rel="stylesheet"/>
 <style>
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -325,7 +230,7 @@
 </div>
 <!-- Actions -->
 <div class="flex items-center gap-1 text-outline shrink-0">
-<button class="p-1.5 hover:bg-surface-container-low hover:text-primary rounded-md transition-colors" id="search-trigger-btn" title="搜索 (Cmd+K)">
+<button aria-controls="search-modal" aria-expanded="false" class="p-1.5 hover:bg-surface-container-low hover:text-primary rounded-md transition-colors" id="search-trigger-btn" title="搜索 (Cmd+K)">
 <span class="material-symbols-outlined text-[20px]">search</span>
 </button>
 <button class="p-1.5 hover:bg-surface-container-low hover:text-primary rounded-md transition-colors" id="sidebar-toggle-btn-expanded" title="折叠侧边栏">
@@ -373,7 +278,7 @@
 <div class="mt-auto border-t border-outline-variant relative">
 <!-- Expanded Profile -->
 <div class="p-4 sidebar-expanded-content">
-<button class="w-full flex items-center justify-between p-2 rounded-lg hover:bg-surface-container-low transition-colors group" id="user-profile-btn">
+<button aria-expanded="false" class="w-full flex items-center justify-between p-2 rounded-lg hover:bg-surface-container-low transition-colors group" id="user-profile-btn">
 <div class="flex items-center gap-3">
 <div class="w-8 h-8 rounded-full bg-pink-100 flex items-center justify-center overflow-hidden border border-outline-variant/30 shrink-0">
 <img alt="Avatar" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD7N4UzgFSv-t167YQxpk5_HJgurdOZaMbJPELwgbA_1Gr-BgJiLHPPHm19CakwwHvskqkhl0nd0wsGQ_WpyrN3jGo_ERleovkbj0GMG6TRYRsaxZijVrRECEr_GlGSKiECFTLP2suyaSK56Q2TZf-Qk06eGw2JsGUm7WnLlt1Zfoa-TJPxycPaGeDLJQffhh_Xi3suaqS43wvTDFIyh-4YFfVF47zdSG7jhnJUlEVOE0QwZt-6iVCh"/>
@@ -506,11 +411,11 @@
 <!-- Input Toolbar -->
 <div class="flex items-center justify-between px-2 pb-2 mt-auto">
 <div class="flex items-center gap-1 md:gap-2">
-<button class="flex items-center gap-1 px-3 py-1.5 rounded-full hover:bg-surface-container-low transition-colors font-body-md text-sm border border-transparent hover:border-outline-variant transition-all duration-300 active:bg-primary/10 active:text-primary text-on-surface-variant" onclick="this.classList.toggle('bg-primary/10'); this.classList.toggle('text-primary'); this.classList.toggle('text-on-surface-variant');">
+<button class="flex items-center gap-1 px-3 py-1.5 rounded-full hover:bg-surface-container-low transition-colors font-body-md text-sm border border-transparent hover:border-outline-variant transition-all duration-300 active:bg-primary/10 active:text-primary text-on-surface-variant" data-composer-toggle type="button">
 <span class="material-symbols-outlined text-sm">search</span>
 <span class="hidden md:inline">深度思考</span>
 </button>
-<button class="flex items-center gap-1 px-3 py-1.5 rounded-full hover:bg-surface-container-low transition-colors font-body-md text-sm border border-transparent hover:border-outline-variant transition-all duration-300 active:bg-primary/10 active:text-primary text-on-surface-variant" onclick="this.classList.toggle('bg-primary/10'); this.classList.toggle('text-primary'); this.classList.toggle('text-on-surface-variant');">
+<button class="flex items-center gap-1 px-3 py-1.5 rounded-full hover:bg-surface-container-low transition-colors font-body-md text-sm border border-transparent hover:border-outline-variant transition-all duration-300 active:bg-primary/10 active:text-primary text-on-surface-variant" data-composer-toggle type="button">
 <span class="material-symbols-outlined text-sm">psychology</span>
 <span class="hidden md:inline">联网搜索</span>
 </button>
@@ -809,7 +714,22 @@
             composerSection?.classList.remove('mt-4', 'mt-24');
             composerSection?.classList.add('mt-8');
             renameDialog?.classList.add('hidden');
+            renameDialog?.classList.remove('flex');
+            renameDialog?.removeAttribute('data-thread-id');
             deleteConfirmDialog?.classList.add('hidden');
+            deleteConfirmDialog?.classList.remove('flex');
+            deleteConfirmDialog?.removeAttribute('data-thread-id');
+            if (renameInput) renameInput.value = '';
+            if (searchInput) searchInput.value = '';
+            recentSearchList?.replaceChildren();
+            searchModal?.classList.add('hidden');
+            userPopupMenu?.classList.add('hidden');
+            userProfileBtn?.setAttribute('aria-expanded', 'false');
+            searchTriggerBtn?.setAttribute('aria-expanded', 'false');
+            closeHistoryActionMenu();
+            setModelDropdownOpen(false);
+            dialogReturnFocus = null;
+            document.activeElement?.blur();
             setSending(false);
             setMonitoringAccess();
             showLoginView();
@@ -1577,6 +1497,13 @@
         }
 
         sendMessageBtn?.addEventListener('click', submitChatMessage);
+        document.querySelectorAll('[data-composer-toggle]').forEach((button) => {
+            button.addEventListener('click', () => {
+                button.classList.toggle('bg-primary/10');
+                button.classList.toggle('text-primary');
+                button.classList.toggle('text-on-surface-variant');
+            });
+        });
         chatInput?.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -1608,10 +1535,12 @@
             userProfileBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 userPopupMenu.classList.toggle('hidden');
+                userProfileBtn.setAttribute('aria-expanded', String(!userPopupMenu.classList.contains('hidden')));
             });
             document.addEventListener('click', (e) => {
                 if(!userPopupMenu.contains(e.target)) {
                     userPopupMenu.classList.add('hidden');
+                    userProfileBtn.setAttribute('aria-expanded', 'false');
                 }
             });
         }
@@ -1850,10 +1779,12 @@
         const searchTriggerBtn = document.getElementById('search-trigger-btn');
         const closeSearchBtn = document.getElementById('close-search-btn');
         const searchInput = document.getElementById('search-input');
+        const recentSearchList = document.getElementById('recent-search-list');
 
         if(searchTriggerBtn && searchModal) {
             searchTriggerBtn.addEventListener('click', () => {
                 searchModal.classList.remove('hidden');
+                searchTriggerBtn.setAttribute('aria-expanded', 'true');
                 setTimeout(() => searchInput && searchInput.focus(), 100);
             });
         }
@@ -1861,6 +1792,7 @@
         if(closeSearchBtn && searchModal) {
             closeSearchBtn.addEventListener('click', () => {
                 searchModal.classList.add('hidden');
+                searchTriggerBtn?.setAttribute('aria-expanded', 'false');
             });
         }
 
@@ -1909,10 +1841,12 @@
             if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
                 e.preventDefault();
                 searchModal?.classList.remove('hidden');
+                searchTriggerBtn?.setAttribute('aria-expanded', 'true');
                 setTimeout(() => searchInput && searchInput.focus(), 100);
             }
             if (e.key === 'Escape') {
                 searchModal?.classList.add('hidden');
+                searchTriggerBtn?.setAttribute('aria-expanded', 'false');
                 userPopupMenu?.classList.add('hidden');
                 closeHistoryActionMenu();
                 setModelDropdownOpen(false);

@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError
 from datetime import timedelta
@@ -86,9 +89,7 @@ class FakeHistoryService:
         self.recorded_owners: list[str] = []
         self.claim_calls: list[tuple[str, str, str]] = []
 
-    def claim_thread(
-        self, thread_id: str, owner_id: str, initial_content: str
-    ) -> None:
+    def claim_thread(self, thread_id: str, owner_id: str, initial_content: str) -> None:
         self.claim_calls.append((thread_id, owner_id, initial_content))
         for (stored_owner, stored_thread), _conversation in self.conversations.items():
             if stored_thread == thread_id:
@@ -664,8 +665,7 @@ def test_admin_multi_field_update_is_atomic(auth_api) -> None:
 @pytest.mark.parametrize("changes", [{"is_active": False}, {"role": "user"}])
 def test_admin_cannot_lock_out_own_management_access(auth_api, changes: dict) -> None:
     assert (
-        login(auth_api.client, "metro.admin", "CorrectHorseBattery1").status_code
-        == 200
+        login(auth_api.client, "metro.admin", "CorrectHorseBattery1").status_code == 200
     )
 
     response = auth_api.client.patch(
@@ -715,9 +715,7 @@ def test_login_rate_limit_blocks_sixth_request_before_service_call(
 
     monkeypatch.setattr(auth_api.service, "login", recording_login)
 
-    responses = [
-        login(auth_api.client, "operator", "WrongPassword9") for _ in range(6)
-    ]
+    responses = [login(auth_api.client, "operator", "WrongPassword9") for _ in range(6)]
 
     assert [response.status_code for response in responses] == [
         401,
@@ -788,9 +786,7 @@ def test_successful_login_clears_failure_bucket(auth_api) -> None:
     assert login(auth_api.client, "operator", "CorrectHorseBattery2").status_code == 200
     auth_api.client.cookies.clear()
 
-    responses = [
-        login(auth_api.client, "operator", "WrongPassword9") for _ in range(6)
-    ]
+    responses = [login(auth_api.client, "operator", "WrongPassword9") for _ in range(6)]
 
     assert [response.status_code for response in responses] == [
         401,
@@ -914,10 +910,30 @@ def test_openapi_has_no_client_supplied_monitoring_user_id(auth_api) -> None:
     assert "user_id" not in {parameter["name"] for parameter in parameters}
 
 
+def test_preview_serves_self_hosted_css_and_strict_script_csp(auth_api) -> None:
+    page = auth_api.client.get("/")
+    css = auth_api.client.get("/static/tailwind.css")
+
+    assert page.status_code == 200
+    assert 'href="/static/tailwind.css"' in page.text
+    csp = page.headers["Content-Security-Policy"]
+    assert "script-src 'self' 'sha256-" in csp
+    assert "'unsafe-inline'" not in csp.split("script-src", 1)[1].split(";", 1)[0]
+    scripts = re.findall(r"<script(?:\s[^>]*)?>(.*?)</script>", page.text, re.DOTALL)
+    assert len(scripts) == 1
+    script_hash = base64.b64encode(
+        hashlib.sha256(scripts[0].encode("utf-8")).digest()
+    ).decode("ascii")
+    assert f"'sha256-{script_hash}'" in csp
+    assert "cdn.tailwindcss.com" not in page.text
+    assert css.status_code == 200
+    assert css.headers["content-type"].startswith("text/css")
+    assert len(css.content) > 1000
+
+
 def test_old_monitoring_user_id_is_explicitly_rejected(auth_api) -> None:
     assert (
-        login(auth_api.client, "metro.admin", "CorrectHorseBattery1").status_code
-        == 200
+        login(auth_api.client, "metro.admin", "CorrectHorseBattery1").status_code == 200
     )
 
     response = auth_api.client.get(
@@ -939,8 +955,7 @@ def test_cross_origin_state_changes_are_rejected(auth_api) -> None:
     )
 
     assert (
-        login(auth_api.client, "metro.admin", "CorrectHorseBattery1").status_code
-        == 200
+        login(auth_api.client, "metro.admin", "CorrectHorseBattery1").status_code == 200
     )
     requests = [
         ("POST", "/api/auth/logout", None),
@@ -1041,9 +1056,7 @@ def test_same_origin_rejects_different_port(auth_api) -> None:
         "http://testserver:",
     ],
 )
-def test_same_origin_rejects_invalid_or_hostless_origin(
-    auth_api, origin: str
-) -> None:
+def test_same_origin_rejects_invalid_or_hostless_origin(auth_api, origin: str) -> None:
     response = auth_api.client.post(
         "/api/auth/login",
         headers={"Origin": origin},

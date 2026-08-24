@@ -1,5 +1,8 @@
+import base64
+import hashlib
 import json
 import logging
+import re
 from collections.abc import AsyncIterator, Callable, Generator
 from contextlib import asynccontextmanager
 from dataclasses import asdict, is_dataclass
@@ -41,7 +44,35 @@ from metro_agent.observability.query_service import (
 logger = logging.getLogger(__name__)
 
 PAGE_PATH = Path(__file__).resolve().parent / "static" / "preview.html"
+TAILWIND_CSS_PATH = Path(__file__).resolve().parent / "static" / "tailwind.css"
 SAFE_ERROR_MESSAGE = "暂时无法完成本次请求，请稍后重试。"
+INLINE_SCRIPT_PATTERN = re.compile(r"<script(?:\s[^>]*)?>(.*?)</script>", re.DOTALL)
+
+
+def build_page_content_security_policy() -> str:
+    page = PAGE_PATH.read_bytes().decode("utf-8-sig")
+    script_hashes = [
+        "'sha256-"
+        + base64.b64encode(hashlib.sha256(script.encode("utf-8")).digest()).decode(
+            "ascii"
+        )
+        + "'"
+        for script in INLINE_SCRIPT_PATTERN.findall(page)
+    ]
+    return "; ".join(
+        [
+            "default-src 'self'",
+            "script-src 'self' " + " ".join(script_hashes),
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+            "font-src 'self' https://fonts.gstatic.com",
+            "img-src 'self' data: https://lh3.googleusercontent.com",
+            "connect-src 'self'",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "frame-ancestors 'none'",
+            "form-action 'self'",
+        ]
+    )
 
 
 class ChatRequest(BaseModel):
@@ -163,7 +194,15 @@ def create_app(
 
     @app.get("/")
     def page() -> FileResponse:
-        return FileResponse(PAGE_PATH, media_type="text/html")
+        return FileResponse(
+            PAGE_PATH,
+            media_type="text/html",
+            headers={"Content-Security-Policy": build_page_content_security_policy()},
+        )
+
+    @app.get("/static/tailwind.css", include_in_schema=False)
+    def tailwind_css() -> FileResponse:
+        return FileResponse(TAILWIND_CSS_PATH, media_type="text/css")
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

@@ -3,6 +3,7 @@
 !.env.example
 .venv/
 .venv-*/
+node_modules/
 .worktrees/
 src/metro_agent.egg-info/
 __pycache__/

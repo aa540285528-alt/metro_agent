@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
+import tomllib
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -61,6 +63,32 @@ def test_preview_uses_cookie_auth_endpoints_and_no_browser_user_id() -> None:
         'searchParams.set("user_id"',
     ):
         assert legacy_fragment not in html
+
+
+def test_preview_uses_build_time_self_hosted_tailwind() -> None:
+    html = _preview()
+    root = PREVIEW_PATH.parents[3]
+
+    assert 'href="/static/tailwind.css"' in html
+    assert "cdn.tailwindcss.com" not in html
+    assert "tailwind.config" not in html
+    assert not re.search(r"<script[^>]+src=[\"']https?://", html)
+    assert "onclick=" not in html
+
+    package = json.loads((root / "package.json").read_text(encoding="utf-8"))
+    assert package["scripts"]["build:css"]
+    assert "tailwindcss" in package["devDependencies"]
+    assert (root / "tailwind.config.js").is_file()
+    tailwind_config = (root / "tailwind.config.js").read_text(encoding="utf-8")
+    assert "letterSpacing: '-" not in tailwind_config
+    assert (root / "src/metro_agent/static/tailwind.input.css").is_file()
+    compiled = root / "src/metro_agent/static/tailwind.css"
+    assert compiled.stat().st_size > 1000
+
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    package_data = project["tool"]["setuptools"]["package-data"]["metro_agent"]
+    assert "static/*.html" in package_data
+    assert "static/*.css" in package_data
 
 
 def test_preview_keeps_only_thread_working_state_in_local_storage() -> None:
@@ -242,6 +270,27 @@ def test_auth_cleanup_restores_a_blank_welcome_workspace() -> None:
     assert "welcomeState?.classList.remove('hidden')" in cleanup
     assert "chatThread?.classList.add('hidden')" in cleanup
     assert "monitoringWorkspace?.classList.add('hidden')" in cleanup
+
+
+def test_auth_cleanup_removes_all_transient_dom_state() -> None:
+    script = _inline_application_script()
+    cleanup = script.split("function clearAuthenticatedState()", 1)[1].split(
+        "async function apiFetch", 1
+    )[0]
+
+    assert "renameInput.value = ''" in cleanup
+    assert "renameDialog?.removeAttribute('data-thread-id')" in cleanup
+    assert "deleteConfirmDialog?.removeAttribute('data-thread-id')" in cleanup
+    assert "searchInput.value = ''" in cleanup
+    assert "recentSearchList?.replaceChildren()" in cleanup
+    assert "userPopupMenu?.classList.add('hidden')" in cleanup
+    assert "searchModal?.classList.add('hidden')" in cleanup
+    assert "userProfileBtn?.setAttribute('aria-expanded', 'false')" in cleanup
+    assert "searchTriggerBtn?.setAttribute('aria-expanded', 'false')" in cleanup
+    assert "closeHistoryActionMenu();" in cleanup
+    assert "setModelDropdownOpen(false);" in cleanup
+    assert "dialogReturnFocus = null" in cleanup
+    assert "document.activeElement?.blur()" in cleanup
 
 
 def test_inline_javascript_has_valid_syntax() -> None:
