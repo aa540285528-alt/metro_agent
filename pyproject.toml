@@ -38,6 +38,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
+testpaths = ["tests"]
 
 [tool.ruff.lint]
 # Preserve the legacy code style while CI blocks syntax and undefined-name defects.

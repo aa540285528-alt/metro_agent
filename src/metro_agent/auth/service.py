@@ -275,6 +275,61 @@ class AuthService:
             )
             return user
 
+    def update_user(
+        self,
+        user_id: int,
+        actor_user_id: int | None,
+        *,
+        role: str | None = None,
+        password: str | None = None,
+        is_active: bool | None = None,
+    ) -> AuthUser:
+        if role is not None:
+            self._validate_role(role)
+        encoded_password = password_hash(password) if password is not None else None
+        now = utc_now_naive()
+
+        with self._session_factory.begin() as session:
+            users = self._lock_users_for_update(session, user_id, actor_user_id)
+            user = users[user_id]
+
+            if role is not None and user.role != role:
+                previous_role = user.role
+                user.role = role
+                self._add_audit(
+                    session,
+                    "user_role_changed",
+                    actor_user_id,
+                    user_id,
+                    {"previous_role": previous_role, "role": role},
+                )
+
+            if encoded_password is not None:
+                user.password_hash = encoded_password
+                self._revoke_active_sessions(session, user_id, now)
+                self._add_audit(
+                    session,
+                    "password_reset",
+                    actor_user_id,
+                    user_id,
+                    {},
+                )
+
+            if is_active is not None and user.is_active is not is_active:
+                user.is_active = is_active
+                if not is_active:
+                    self._revoke_active_sessions(session, user_id, now)
+                self._add_audit(
+                    session,
+                    "user_enabled" if is_active else "user_disabled",
+                    actor_user_id,
+                    user_id,
+                    {},
+                )
+
+            user.updated_at = now
+            return user
+
     def reset_password(
         self,
         user_id: int,

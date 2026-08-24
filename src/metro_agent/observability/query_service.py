@@ -17,7 +17,6 @@ class TraceNotFound(LookupError):
 
 @dataclass(frozen=True)
 class MonitoringFilter:
-    user_id: str
     started_after: datetime | None = None
     started_before: datetime | None = None
     status: str | None = None
@@ -153,7 +152,7 @@ class EvaluationRunListItem:
 
 
 class MonitoringQueryService:
-    """Read-only, owner-scoped projections over persisted observability data."""
+    """Read-only administrator projections over persisted observability data."""
 
     def __init__(self, session_factory: Callable[[], Session]) -> None:
         self._session_factory = session_factory
@@ -175,10 +174,10 @@ class MonitoringQueryService:
                 total=total,
             )
 
-    def get_trace(self, trace_id: str, user_id: str) -> TraceDetail:
+    def get_trace(self, trace_id: str) -> TraceDetail:
         with self._session_factory() as session:
             trace = session.scalar(
-                select(AgentTrace).where(AgentTrace.id == trace_id, AgentTrace.user_id == user_id)
+                select(AgentTrace).where(AgentTrace.id == trace_id)
             )
             if trace is None:
                 raise TraceNotFound(trace_id)
@@ -291,7 +290,7 @@ class MonitoringQueryService:
             ]
 
     def _filtered_trace_statement(self, filters: MonitoringFilter) -> Select[tuple[AgentTrace]]:
-        statement = select(AgentTrace).where(AgentTrace.user_id == filters.user_id)
+        statement = select(AgentTrace)
         if filters.started_after is not None:
             statement = statement.where(AgentTrace.started_at >= filters.started_after)
         if filters.started_before is not None:

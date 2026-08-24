@@ -5,16 +5,28 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from metro_agent.agent_service import AgentRunError, run_chat
+from metro_agent.auth.database import create_auth_session_factory
+from metro_agent.auth.dependencies import CurrentUser, get_current_user, require_admin
+from metro_agent.auth.router import (
+    create_auth_router,
+    get_auth_cookie_secure,
+    get_auth_session_ttl_seconds,
+)
+from metro_agent.auth.service import AuthService
 from metro_agent.storage.history.service import ConversationNotFound
-from metro_agent.observability.query_service import MonitoringFilter, MonitoringQueryService, TraceNotFound
+from metro_agent.observability.query_service import (
+    MonitoringFilter,
+    MonitoringQueryService,
+    TraceNotFound,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -24,11 +36,12 @@ SAFE_ERROR_MESSAGE = "暂时无法完成本次请求，请稍后重试。"
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     thread_id: str = Field(..., max_length=128, strict=True)
-    user_id: str = Field(..., max_length=128, strict=True)
     message: str = Field(..., max_length=10000, strict=True)
 
-    @field_validator("thread_id", "user_id", "message")
+    @field_validator("thread_id", "message")
     @classmethod
     def require_non_blank(cls, value: str) -> str:
         value = value.strip()
@@ -67,6 +80,10 @@ def build_default_monitoring_service() -> Any:
     return MonitoringQueryService(SessionLocal)
 
 
+def build_default_auth_service() -> AuthService:
+    return AuthService(create_auth_session_factory())
+
+
 def encode_sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
@@ -76,7 +93,6 @@ def serialize_history(value: Any) -> Any:
 
 
 def monitoring_filter(
-    user_id: str = Query(..., min_length=1, max_length=128),
     started_after: datetime | None = None,
     started_before: datetime | None = None,
     status: str | None = Query(default=None, max_length=32),
@@ -86,7 +102,6 @@ def monitoring_filter(
     offset: int = Query(default=0, ge=0),
 ) -> MonitoringFilter:
     return MonitoringFilter(
-        user_id=user_id,
         started_after=started_after,
         started_before=started_before,
         status=status,
@@ -101,20 +116,31 @@ def create_app(
     graph_factory: Callable[[], Any] = build_default_graph,
     history_service_factory: Callable[[], Any] = build_default_history_service,
     monitoring_service_factory: Callable[[], Any] | None = None,
+    auth_service_factory: Callable[[], Any] = build_default_auth_service,
+    chat_runner: Callable[..., str] = run_chat,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.graph = graph_factory()
         app.state.history_service = history_service_factory()
+        app.state.auth_service = auth_service_factory()
         app.state.monitoring_service_factory = (
             monitoring_service_factory or build_default_monitoring_service
         )
         app.state.monitoring_service = (
-            monitoring_service_factory() if monitoring_service_factory is not None else None
+            monitoring_service_factory()
+            if monitoring_service_factory is not None
+            else None
         )
         yield
 
     app = FastAPI(lifespan=lifespan)
+    app.include_router(
+        create_auth_router(
+            cookie_secure=get_auth_cookie_secure(),
+            session_ttl_seconds=get_auth_session_ttl_seconds(),
+        )
+    )
 
     @app.get("/")
     def page() -> FileResponse:
@@ -126,13 +152,17 @@ def create_app(
 
     @app.get("/api/monitoring/summary")
     def monitoring_summary(
-        request: Request, filters: MonitoringFilter = Depends(monitoring_filter)
+        request: Request,
+        filters: MonitoringFilter = Depends(monitoring_filter),
+        _admin: CurrentUser = Depends(require_admin),
     ) -> dict[str, Any]:
         return serialize_history(_monitoring_service(request).summary(filters))
 
     @app.get("/api/monitoring/traces")
     def monitoring_traces(
-        request: Request, filters: MonitoringFilter = Depends(monitoring_filter)
+        request: Request,
+        filters: MonitoringFilter = Depends(monitoring_filter),
+        _admin: CurrentUser = Depends(require_admin),
     ) -> dict[str, Any]:
         return serialize_history(_monitoring_service(request).list_traces(filters))
 
@@ -140,10 +170,10 @@ def create_app(
     def monitoring_trace_detail(
         request: Request,
         trace_id: str,
-        user_id: str = Query(..., min_length=1, max_length=128),
+        _admin: CurrentUser = Depends(require_admin),
     ) -> dict[str, Any]:
         try:
-            detail = _monitoring_service(request).get_trace(trace_id, user_id)
+            detail = _monitoring_service(request).get_trace(trace_id)
         except TraceNotFound as exc:
             raise HTTPException(status_code=404, detail="Trace not found") from exc
         return serialize_history(detail)
@@ -151,66 +181,90 @@ def create_app(
     @app.get("/api/monitoring/evaluations")
     def monitoring_evaluations(
         request: Request,
-        user_id: str = Query(..., min_length=1, max_length=128),
         category: str | None = Query(default=None, max_length=32),
+        _admin: CurrentUser = Depends(require_admin),
     ) -> list[dict[str, Any]]:
-        del user_id
         values = _monitoring_service(request).list_evaluations(category=category)
         return [serialize_history(value) for value in values]
 
     @app.get("/api/conversations")
-    def list_conversations(request: Request, user_id: str) -> list[dict[str, Any]]:
-        conversations = request.app.state.history_service.list_conversations(user_id)
+    def list_conversations(
+        request: Request,
+        current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    ) -> list[dict[str, Any]]:
+        conversations = request.app.state.history_service.list_conversations(
+            str(current_user.id)
+        )
         return [serialize_history(conversation) for conversation in conversations]
 
     @app.get("/api/conversations/{thread_id}")
     def get_conversation(
-        request: Request, thread_id: str, user_id: str
+        request: Request,
+        thread_id: str,
+        current_user: Annotated[CurrentUser, Depends(get_current_user)],
     ) -> dict[str, Any]:
         try:
             conversation = request.app.state.history_service.get_conversation(
-                thread_id, user_id
+                thread_id, str(current_user.id)
             )
         except ConversationNotFound as exc:
-            raise HTTPException(status_code=404, detail="Conversation not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Conversation not found"
+            ) from exc
         return serialize_history(conversation)
 
     @app.patch("/api/conversations/{thread_id}")
     def update_conversation(
         request: Request,
         thread_id: str,
-        user_id: str,
         payload: ConversationUpdateRequest,
+        current_user: Annotated[CurrentUser, Depends(get_current_user)],
     ) -> dict[str, Any]:
         try:
             conversation = request.app.state.history_service.update_conversation(
                 thread_id,
-                user_id,
+                str(current_user.id),
                 title=payload.title,
                 is_pinned=payload.is_pinned,
             )
         except ConversationNotFound as exc:
-            raise HTTPException(status_code=404, detail="Conversation not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Conversation not found"
+            ) from exc
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail="Invalid conversation update") from exc
+            raise HTTPException(
+                status_code=422, detail="Invalid conversation update"
+            ) from exc
         return serialize_history(conversation)
 
     @app.delete("/api/conversations/{thread_id}", status_code=204)
-    def delete_conversation(request: Request, thread_id: str, user_id: str) -> Response:
+    def delete_conversation(
+        request: Request,
+        thread_id: str,
+        current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    ) -> Response:
         try:
-            request.app.state.history_service.delete_conversation(thread_id, user_id)
+            request.app.state.history_service.delete_conversation(
+                thread_id, str(current_user.id)
+            )
         except ConversationNotFound as exc:
-            raise HTTPException(status_code=404, detail="Conversation not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Conversation not found"
+            ) from exc
         return Response(status_code=204)
 
     @app.post("/api/chat/stream")
-    def chat_stream(request: Request, payload: ChatRequest) -> StreamingResponse:
+    def chat_stream(
+        request: Request,
+        payload: ChatRequest,
+        current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    ) -> StreamingResponse:
         def events() -> Generator[str, None, None]:
             try:
-                answer = run_chat(
+                answer = chat_runner(
                     request.app.state.graph,
                     thread_id=payload.thread_id,
-                    user_id=payload.user_id,
+                    user_id=str(current_user.id),
                     message=payload.message,
                 )
             except AgentRunError:
@@ -226,7 +280,7 @@ def create_app(
                 try:
                     request.app.state.history_service.record_turn(
                         payload.thread_id,
-                        payload.user_id,
+                        str(current_user.id),
                         payload.message,
                         answer,
                     )
