@@ -296,14 +296,11 @@ class LoginRateLimiter:
                     1,
                 )
         if len(self._buckets) + missing_keys > self._max_tracked_keys:
-            retry_after = max(retry_after, self._capacity_retry_after(now))
+            retry_after = max(retry_after, self._capacity_retry_after())
         return retry_after
 
-    def _capacity_retry_after(self, now: float) -> int:
-        earliest = self._expirations.peek()
-        if earliest is None:
-            return self._window_seconds
-        return max(1, math.ceil(earliest[0] - now))
+    def _capacity_retry_after(self) -> int:
+        return self._window_seconds
 
     def _expire_due(self, now: float) -> None:
         while True:

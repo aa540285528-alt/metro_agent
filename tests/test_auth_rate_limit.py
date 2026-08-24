@@ -346,6 +346,33 @@ def test_expired_capacity_is_reclaimed_for_new_key() -> None:
     assert limiter.tracked_key_count == 3
 
 
+def test_capacity_retry_after_covers_staggered_scope_expirations() -> None:
+    from metro_agent.auth.rate_limit import LoginAttemptBlocked, LoginAttemptLease
+    from metro_agent.auth.rate_limit import LoginRateLimiter
+
+    clock = FakeClock()
+    limiter = LoginRateLimiter(max_tracked_keys=5, clock=clock)
+    first = limiter.begin_attempt("victim", "10.0.0.1")
+    assert isinstance(first, LoginAttemptLease)
+    limiter.finalize_failure(first)
+
+    clock.advance(10)
+    second = limiter.begin_attempt("victim", "10.0.0.2")
+    assert isinstance(second, LoginAttemptLease)
+    limiter.finalize_failure(second)
+
+    clock.advance(10)
+    blocked = limiter.begin_attempt("new.user", "10.0.0.3")
+
+    assert isinstance(blocked, LoginAttemptBlocked)
+    assert blocked.retry_after == 60
+
+    clock.advance(blocked.retry_after)
+    recovered = limiter.begin_attempt("new.user", "10.0.0.3")
+
+    assert isinstance(recovered, LoginAttemptLease)
+
+
 class NoFullScanOrderedDict(OrderedDict):
     def __iter__(self):
         raise AssertionError("request path must not scan all limiter keys")
