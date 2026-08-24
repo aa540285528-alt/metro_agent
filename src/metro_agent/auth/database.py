@@ -30,7 +30,11 @@ def get_auth_database_url() -> str:
 
 
 def create_auth_engine() -> Engine:
-    return create_engine(get_auth_database_url(), pool_pre_ping=True)
+    return create_engine(
+        get_auth_database_url(),
+        pool_pre_ping=True,
+        hide_parameters=True,
+    )
 
 
 def create_auth_session_factory() -> sessionmaker[Session]:

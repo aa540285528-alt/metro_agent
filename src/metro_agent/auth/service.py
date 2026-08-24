@@ -25,6 +25,7 @@ from metro_agent.auth.passwords import (
 
 
 _ALLOWED_ROLES = frozenset({"admin", "user"})
+_MAX_SESSION_TTL = timedelta(hours=8)
 _DUMMY_PASSWORD_HASH = (
     "$argon2id$v=19$m=65536,t=3,p=4$DWOPKfDPXCaXtDpklUZG8w$"
     "VwwEezJKpT2x7NLBEE6om5LoxH4jvf8/+tNm9V0hUiY"
@@ -66,8 +67,8 @@ class AuthService:
             session.add(user)
             try:
                 session.flush()
-            except IntegrityError as exc:
-                raise ValueError("username already exists") from exc
+            except IntegrityError:
+                raise ValueError("username already exists") from None
             self._add_audit(
                 session,
                 "user_created",
@@ -82,7 +83,9 @@ class AuthService:
             normalized = normalize_username(username)
         except ValueError:
             verify_password(password, _DUMMY_PASSWORD_HASH)
-            self._record_failed_authentication(str(username).strip().lower())
+            self._record_failed_authentication(
+                self._malformed_username_metadata(username)
+            )
             return None
 
         with self._session_factory.begin() as session:
@@ -118,11 +121,12 @@ class AuthService:
         ttl: timedelta,
         actor_user_id: int | None,
     ) -> str:
+        self._validate_session_ttl(ttl)
         raw_token = secrets.token_urlsafe(32)
         now = utc_now_naive()
         with self._session_factory.begin() as session:
-            user = session.get(AuthUser, user_id)
-            if user is None or not user.is_active:
+            user = self._require_user_for_update(session, user_id)
+            if not user.is_active:
                 raise ValueError("active user not found")
             session.add(
                 AuthSession(
@@ -164,15 +168,18 @@ class AuthService:
     ) -> None:
         with self._session_factory.begin() as session:
             auth_session = session.scalar(
-                select(AuthSession).where(
+                select(AuthSession)
+                .where(
                     AuthSession.token_hash == self._hash_token(raw_token),
                     AuthSession.user_id == user_id,
                 )
+                .with_for_update()
             )
             if auth_session is None:
                 raise ValueError("session not found")
-            if auth_session.revoked_at is None:
-                auth_session.revoked_at = utc_now_naive()
+            if auth_session.revoked_at is not None:
+                return
+            auth_session.revoked_at = utc_now_naive()
             self._add_audit(session, "session_revoked", actor_user_id, user_id, {})
 
     def set_user_active(
@@ -183,7 +190,9 @@ class AuthService:
     ) -> AuthUser:
         now = utc_now_naive()
         with self._session_factory.begin() as session:
-            user = self._require_user(session, user_id)
+            user = self._require_user_for_update(session, user_id)
+            if user.is_active is is_active:
+                return user
             user.is_active = is_active
             user.updated_at = now
             if not is_active:
@@ -206,7 +215,7 @@ class AuthService:
         encoded = password_hash(new_password)
         now = utc_now_naive()
         with self._session_factory.begin() as session:
-            user = self._require_user(session, user_id)
+            user = self._require_user_for_update(session, user_id)
             user.password_hash = encoded
             user.updated_at = now
             self._revoke_active_sessions(session, user_id, now)
@@ -222,14 +231,14 @@ class AuthService:
                 session.scalars(select(AuthAuditEvent).order_by(AuthAuditEvent.id))
             )
 
-    def _record_failed_authentication(self, username: str) -> None:
+    def _record_failed_authentication(self, metadata: dict[str, str]) -> None:
         with self._session_factory.begin() as session:
             self._add_audit(
                 session,
                 "authentication_failed",
                 None,
                 None,
-                {"username": username},
+                metadata,
             )
 
     def _hash_token(self, raw_token: str) -> str:
@@ -256,11 +265,26 @@ class AuthService:
         )
 
     @staticmethod
-    def _require_user(session: Session, user_id: int) -> AuthUser:
-        user = session.get(AuthUser, user_id)
+    def _require_user_for_update(session: Session, user_id: int) -> AuthUser:
+        user = session.scalar(
+            select(AuthUser).where(AuthUser.id == user_id).with_for_update()
+        )
         if user is None:
             raise ValueError("user not found")
         return user
+
+    @staticmethod
+    def _validate_session_ttl(ttl: timedelta) -> None:
+        if not isinstance(ttl, timedelta) or not timedelta(0) < ttl <= _MAX_SESSION_TTL:
+            raise ValueError(
+                "session ttl must be greater than zero and at most 8 hours"
+            )
+
+    @staticmethod
+    def _malformed_username_metadata(username: object) -> dict[str, str]:
+        normalized = str(username).strip().lower()
+        digest = hashlib.sha256(normalized.encode()).hexdigest()
+        return {"username_sha256": digest}
 
     @staticmethod
     def _revoke_active_sessions(session: Session, user_id: int, now: datetime) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from pwdlib import PasswordHash
+from pwdlib.exceptions import UnknownHashError
 
 
 _USERNAME_PATTERN = re.compile(r"[a-z0-9._-]{3,64}")
@@ -28,7 +29,7 @@ def password_hash(password: str) -> str:
 def verify_password(password: str, encoded: str) -> bool:
     try:
         return _PASSWORD_HASH.verify(password, encoded)
-    except (TypeError, ValueError):
+    except (TypeError, UnknownHashError, ValueError):
         return False
 
 
