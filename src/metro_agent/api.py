@@ -45,6 +45,12 @@ logger = logging.getLogger(__name__)
 
 PAGE_PATH = Path(__file__).resolve().parent / "static" / "preview.html"
 TAILWIND_CSS_PATH = Path(__file__).resolve().parent / "static" / "tailwind.css"
+MATERIAL_SYMBOLS_FONT_PATH = (
+    Path(__file__).resolve().parent
+    / "static"
+    / "fonts"
+    / "material-symbols-outlined.woff2"
+)
 SAFE_ERROR_MESSAGE = "暂时无法完成本次请求，请稍后重试。"
 INLINE_SCRIPT_PATTERN = re.compile(r"<script(?:\s[^>]*)?>(.*?)</script>", re.DOTALL)
 
@@ -53,9 +59,11 @@ def build_page_content_security_policy() -> str:
     page = PAGE_PATH.read_bytes().decode("utf-8-sig")
     script_hashes = [
         "'sha256-"
-        + base64.b64encode(hashlib.sha256(script.encode("utf-8")).digest()).decode(
-            "ascii"
-        )
+        + base64.b64encode(
+            hashlib.sha256(
+                script.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+            ).digest()
+        ).decode("ascii")
         + "'"
         for script in INLINE_SCRIPT_PATTERN.findall(page)
     ]
@@ -63,8 +71,8 @@ def build_page_content_security_policy() -> str:
         [
             "default-src 'self'",
             "script-src 'self' " + " ".join(script_hashes),
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-            "font-src 'self' https://fonts.gstatic.com",
+            "style-src 'self'",
+            "font-src 'self'",
             "img-src 'self' data: https://lh3.googleusercontent.com",
             "connect-src 'self'",
             "object-src 'none'",
@@ -203,6 +211,13 @@ def create_app(
     @app.get("/static/tailwind.css", include_in_schema=False)
     def tailwind_css() -> FileResponse:
         return FileResponse(TAILWIND_CSS_PATH, media_type="text/css")
+
+    @app.get(
+        "/static/fonts/material-symbols-outlined.woff2",
+        include_in_schema=False,
+    )
+    def material_symbols_font() -> FileResponse:
+        return FileResponse(MATERIAL_SYMBOLS_FONT_PATH, media_type="font/woff2")
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

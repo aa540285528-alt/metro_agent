@@ -1,3 +1,149 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@font-face {
+  font-family: 'Material Symbols Outlined';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: block;
+  src: url('/static/fonts/material-symbols-outlined.woff2') format('woff2');
+}
+
+.material-symbols-outlined {
+  display: inline-block;
+  direction: ltr;
+  font-family: 'Material Symbols Outlined';
+  font-size: 24px;
+  font-style: normal;
+  font-weight: normal;
+  font-feature-settings: 'liga';
+  font-variation-settings: 'FILL' 0, 'wght' 400;
+  letter-spacing: normal;
+  line-height: 1;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+  -webkit-font-smoothing: antialiased;
+}
+
+.material-symbols-filled {
+  font-variation-settings: 'FILL' 1, 'wght' 400;
+}
+
+.composer-input {
+  field-sizing: content;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.focus-ring:focus-within { outline: 2px solid #0033ff; outline-offset: -1px; }
+.tonal-shadow { box-shadow: 0 4px 12px -2px rgba(0, 51, 255, 0.08); }
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in-up { animation: fade-in-up 0.6s cubic-bezier(0.2, 0, 0, 1) forwards; }
+#sidebar { transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+#main-content { transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+
+.sidebar-expanded-content {
+  transition: opacity 0.2s ease, width 0.3s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  opacity: 1;
+}
+.sidebar-collapsed .sidebar-expanded-content { opacity: 0; width: 0; display: none; }
+.sidebar-collapsed-content { display: none; opacity: 0; transition: opacity 0.2s ease; }
+.sidebar-collapsed .sidebar-collapsed-content { display: flex; opacity: 1; }
+.sidebar-collapsed .expanded-only { display: none; }
+
+.history-action-trigger {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  cursor: pointer;
+}
+.history-action-trigger.is-active {
+  opacity: 1 !important;
+  color: #0033ff !important;
+  background: rgba(0, 51, 255, 0.08);
+  box-shadow: 0 0 0 2px #0033ff;
+}
+
+.history-scrollbar,
+.chat-scrollbar { scrollbar-width: thin; scrollbar-color: #c4c5da transparent; }
+.history-scrollbar::-webkit-scrollbar,
+.chat-scrollbar::-webkit-scrollbar { width: 6px; }
+.history-scrollbar::-webkit-scrollbar-track,
+.chat-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.history-scrollbar::-webkit-scrollbar-thumb,
+.chat-scrollbar::-webkit-scrollbar-thumb { background: #c4c5da; border-radius: 9999px; }
+.history-scrollbar::-webkit-scrollbar-thumb:hover,
+.chat-scrollbar::-webkit-scrollbar-thumb:hover { background: #747689; }
+
+.thread-index-rail {
+  backdrop-filter: blur(18px);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 16px 40px rgba(20, 27, 43, 0.12);
+  width: 24px;
+  max-height: 360px;
+  overflow: hidden;
+  transition: width 0.22s ease, padding 0.22s ease, border-radius 0.22s ease;
+}
+.thread-index-rail:hover,
+.thread-index-rail:focus-within { width: 220px; padding-left: 14px; padding-right: 10px; }
+.thread-index-list {
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #c4c5da transparent;
+}
+.thread-index-list::-webkit-scrollbar { width: 4px; }
+.thread-index-list::-webkit-scrollbar-track { background: transparent; }
+.thread-index-list::-webkit-scrollbar-thumb { background: #c4c5da; border-radius: 9999px; }
+.thread-index-item {
+  width: 100%;
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: 18px 1fr 14px;
+  gap: 8px;
+  align-items: center;
+  color: #747689;
+  border-radius: 10px;
+  padding: 4px 6px;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+.thread-index-item:hover { background: rgba(0, 51, 255, 0.06); color: #0033ff; }
+.thread-index-item.is-active { color: #0033ff; background: rgba(0, 51, 255, 0.1); }
+.thread-index-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+.thread-index-rail:hover .thread-index-label,
+.thread-index-rail:focus-within .thread-index-label { opacity: 1; }
+.thread-index-mark {
+  width: 16px;
+  height: 2px;
+  border-radius: 9999px;
+  background: currentColor;
+  justify-self: center;
+}
+.thread-index-dot {
+  width: 8px;
+  height: 8px;
+  border: 2px solid currentColor;
+  border-radius: 9999px;
+  justify-self: center;
+}

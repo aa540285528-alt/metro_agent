@@ -73,13 +73,13 @@ module.exports = {
         'sidebar-collapsed': '64px'
       },
       fontFamily: {
-        'headline-lg-mobile': ['Inter'],
-        'headline-lg': ['Inter'],
-        'label-caps': ['Inter'],
-        'body-md': ['Inter'],
-        'code-sm': ['Geist'],
-        'body-lg': ['Inter'],
-        'headline-md': ['Inter']
+        'headline-lg-mobile': ['ui-sans-serif', 'system-ui', 'sans-serif'],
+        'headline-lg': ['ui-sans-serif', 'system-ui', 'sans-serif'],
+        'label-caps': ['ui-sans-serif', 'system-ui', 'sans-serif'],
+        'body-md': ['ui-sans-serif', 'system-ui', 'sans-serif'],
+        'code-sm': ['ui-monospace', 'SFMono-Regular', 'Consolas', 'monospace'],
+        'body-lg': ['ui-sans-serif', 'system-ui', 'sans-serif'],
+        'headline-md': ['ui-sans-serif', 'system-ui', 'sans-serif']
       },
       fontSize: {
         'headline-lg-mobile': ['24px', { lineHeight: '32px', letterSpacing: '0', fontWeight: '600' }],

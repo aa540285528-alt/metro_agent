@@ -37,7 +37,7 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-metro_agent = ["static/*.html", "static/*.css"]
+metro_agent = ["static/*.html", "static/*.css", "static/fonts/*.woff2"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

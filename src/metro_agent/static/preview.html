@@ -4,188 +4,14 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title>地铁运维助手</title>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet"/>
-<link href="https://fonts.googleapis.com" rel="preconnect"/>
-<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;family=Geist:wght@400;500&amp;display=swap" rel="stylesheet"/>
 <link href="/static/tailwind.css" rel="stylesheet"/>
-<style>
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        .focus-ring:focus-within { outline: 2px solid #0033ff; outline-offset: -1px; }
-        .tonal-shadow { box-shadow: 0 4px 12px -2px rgba(0, 51, 255, 0.08); }
-        @keyframes fade-in-up {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in-up { animation: fade-in-up 0.6s cubic-bezier(0.2, 0, 0, 1) forwards; }
-        
-        /* Sidebar Transitions */
-        #sidebar {
-            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        #main-content {
-            transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        
-        .sidebar-expanded-content {
-            transition: opacity 0.2s ease, width 0.3s ease;
-            white-space: nowrap;
-            overflow: hidden;
-            opacity: 1;
-        }
-        .sidebar-collapsed .sidebar-expanded-content {
-            opacity: 0;
-            width: 0;
-            display: none;
-        }
-        
-        .sidebar-collapsed-content {
-            display: none;
-            opacity: 0;
-            transition: opacity 0.2s ease;
-        }
-        .sidebar-collapsed .sidebar-collapsed-content {
-            display: flex;
-            opacity: 1;
-        }
-        .sidebar-collapsed .expanded-only {
-            display: none;
-        }
-        .history-action-trigger {
-            width: 28px;
-            height: 28px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 9999px;
-            cursor: pointer;
-        }
-        .history-action-trigger.is-active {
-            opacity: 1 !important;
-            color: #0033ff !important;
-            background: rgba(0, 51, 255, 0.08);
-            box-shadow: 0 0 0 2px #0033ff;
-        }
-        .history-scrollbar {
-            scrollbar-width: thin;
-            scrollbar-color: #c4c5da transparent;
-        }
-        .history-scrollbar::-webkit-scrollbar {
-            width: 6px;
-        }
-        .history-scrollbar::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        .history-scrollbar::-webkit-scrollbar-thumb {
-            background: #c4c5da;
-            border-radius: 9999px;
-        }
-        .history-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: #747689;
-        }
-        .chat-scrollbar {
-            scrollbar-width: thin;
-            scrollbar-color: #c4c5da transparent;
-        }
-        .chat-scrollbar::-webkit-scrollbar {
-            width: 6px;
-        }
-        .chat-scrollbar::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        .chat-scrollbar::-webkit-scrollbar-thumb {
-            background: #c4c5da;
-            border-radius: 9999px;
-        }
-        .chat-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: #747689;
-        }
-        .thread-index-rail {
-            backdrop-filter: blur(18px);
-            background: rgba(255, 255, 255, 0.72);
-            box-shadow: 0 16px 40px rgba(20, 27, 43, 0.12);
-            width: 24px;
-            max-height: 360px;
-            overflow: hidden;
-            transition: width 0.22s ease, padding 0.22s ease, border-radius 0.22s ease;
-        }
-        .thread-index-rail:hover,
-        .thread-index-rail:focus-within {
-            width: 220px;
-            padding-left: 14px;
-            padding-right: 10px;
-        }
-        .thread-index-list {
-            max-height: 320px;
-            overflow-y: auto;
-            scrollbar-width: thin;
-            scrollbar-color: #c4c5da transparent;
-        }
-        .thread-index-list::-webkit-scrollbar {
-            width: 4px;
-        }
-        .thread-index-list::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        .thread-index-list::-webkit-scrollbar-thumb {
-            background: #c4c5da;
-            border-radius: 9999px;
-        }
-        .thread-index-item {
-            width: 100%;
-            min-height: 30px;
-            display: grid;
-            grid-template-columns: 18px 1fr 14px;
-            gap: 8px;
-            align-items: center;
-            color: #747689;
-            border-radius: 10px;
-            padding: 4px 6px;
-            transition: background 0.16s ease, color 0.16s ease;
-        }
-        .thread-index-item:hover {
-            background: rgba(0, 51, 255, 0.06);
-            color: #0033ff;
-        }
-        .thread-index-item.is-active {
-            color: #0033ff;
-            background: rgba(0, 51, 255, 0.1);
-        }
-        .thread-index-label {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            font-size: 12px;
-            opacity: 0;
-            transition: opacity 0.16s ease;
-        }
-        .thread-index-rail:hover .thread-index-label,
-        .thread-index-rail:focus-within .thread-index-label {
-            opacity: 1;
-        }
-        .thread-index-mark {
-            width: 16px;
-            height: 2px;
-            border-radius: 9999px;
-            background: currentColor;
-            justify-self: center;
-        }
-        .thread-index-dot {
-            width: 8px;
-            height: 8px;
-            border: 2px solid currentColor;
-            border-radius: 9999px;
-            justify-self: center;
-        }
-    </style>
 </head>
 <body class="bg-background text-on-background antialiased flex h-screen overflow-hidden">
 <section class="flex h-full w-full items-center justify-center px-4" id="auth-gate" aria-live="polite">
 <div class="w-full max-w-sm">
 <div class="mb-8 flex items-center justify-center gap-3">
 <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-on-primary">
-<span class="material-symbols-outlined text-2xl" style='font-variation-settings: "FILL" 1;'>neurology</span>
+<span class="material-symbols-outlined material-symbols-filled text-2xl">neurology</span>
 </div>
 <h1 class="font-headline-md text-2xl font-bold text-primary">地铁运维助手</h1>
 </div>
@@ -224,7 +50,7 @@
 <div class="flex items-center justify-between h-10">
 <div class="flex items-center gap-3 cursor-pointer">
 <div class="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-on-primary shrink-0">
-<span class="material-symbols-outlined text-lg" data-original-icon="neurology" style='font-variation-settings: "FILL" 1;'>neurology</span>
+<span class="material-symbols-outlined material-symbols-filled text-lg" data-original-icon="neurology">neurology</span>
 </div>
 <h1 class="font-headline-md text-headline-md font-bold text-primary tracking-tight">地铁运维助手</h1>
 </div>
@@ -251,7 +77,7 @@
 <!-- Collapsed Rail -->
 <div class="sidebar-collapsed-content flex-col items-center gap-2 pt-4 w-full">
 <div class="w-10 h-10 rounded-lg bg-primary flex items-center justify-center text-on-primary cursor-pointer mb-2">
-<span class="material-symbols-outlined text-xl" style='font-variation-settings: "FILL" 1;'>neurology</span>
+<span class="material-symbols-outlined material-symbols-filled text-xl">neurology</span>
 </div>
 <button class="w-10 h-10 flex items-center justify-center rounded-xl text-outline hover:text-primary hover:bg-surface-container-low transition-colors" id="sidebar-toggle-btn-collapsed" title="展开侧边栏">
 <span class="material-symbols-outlined text-[20px]">dock_to_right</span>
@@ -306,7 +132,7 @@
 </div>
 </nav>
 <!-- History Item Action Menu -->
-<div class="fixed hidden w-[128px] bg-surface-container-lowest border border-outline-variant rounded-xl shadow-lg tonal-shadow p-1" id="history-action-menu" style="z-index: 1200;">
+<div class="fixed left-[272px] top-1/2 z-[1200] hidden w-[128px] -translate-y-1/2 bg-surface-container-lowest border border-outline-variant rounded-xl shadow-lg tonal-shadow p-1" id="history-action-menu">
 <button class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-on-surface hover:bg-surface-container-low text-sm transition-colors text-left" data-history-action="rename" type="button">
 <span class="material-symbols-outlined text-[18px]">edit</span>
 <span>重命名</span>
@@ -320,7 +146,7 @@
 <span>删除</span>
 </button>
 </div>
-<div class="fixed inset-0 hidden items-center justify-center bg-on-surface/20 p-4" id="rename-dialog" style="z-index: 1210;">
+<div class="fixed inset-0 z-[1210] hidden items-center justify-center bg-on-surface/20 p-4" id="rename-dialog">
 <form class="w-full max-w-sm rounded-lg bg-surface-container-lowest p-5 shadow-lg" id="rename-form" role="dialog" aria-modal="true" aria-labelledby="rename-dialog-title">
 <h2 class="text-base font-semibold text-on-surface" id="rename-dialog-title">重命名对话</h2>
 <label class="block text-sm font-medium text-on-surface" for="rename-input">重命名对话</label>
@@ -331,7 +157,7 @@
 </div>
 </form>
 </div>
-<div class="fixed inset-0 hidden items-center justify-center bg-on-surface/20 p-4" id="delete-confirm-dialog" style="z-index: 1210;">
+<div class="fixed inset-0 z-[1210] hidden items-center justify-center bg-on-surface/20 p-4" id="delete-confirm-dialog">
 <div class="w-full max-w-sm rounded-lg bg-surface-container-lowest p-5 shadow-lg" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title">
 <h2 class="text-base font-semibold text-on-surface" id="delete-dialog-title">删除对话？</h2>
 <p class="mt-2 text-sm text-on-surface-variant">此操作无法撤销。</p>
@@ -347,7 +173,7 @@
 <header class="md:hidden flex items-center justify-between p-4 bg-surface-container-lowest border-b border-outline-variant z-20 sticky top-0">
 <div class="flex items-center gap-2">
 <div class="w-8 h-8 rounded-md bg-primary flex items-center justify-center text-on-primary">
-<span class="material-symbols-outlined text-sm" style='font-variation-settings: "FILL" 1;'>neurology</span>
+<span class="material-symbols-outlined material-symbols-filled text-sm">neurology</span>
 </div>
 <h1 class="font-headline-md text-headline-md font-bold text-primary">地铁运维助手</h1>
 </div>
@@ -379,10 +205,10 @@
 <!-- Hero Brand Identity -->
 <div class="text-center animate-fade-in-up mb-24" id="welcome-state">
 <div class="w-20 h-20 md:w-24 md:h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-primary to-surface-tint flex items-center justify-center shadow-lg shadow-primary/20">
-<span class="material-symbols-outlined text-on-primary text-5xl md:text-6xl" style='font-variation-settings: "FILL" 1;'>neurology</span>
+<span class="material-symbols-outlined material-symbols-filled text-on-primary text-5xl md:text-6xl">neurology</span>
 </div>
 <h2 class="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg font-black text-on-background tracking-tight mb-4">我今天能帮您什么？</h2>
-<div class="relative group mx-auto w-fit z-50 overflow-visible" id="model-selector"><div class="hidden absolute left-1/2 -translate-x-1/2 mb-2 w-[200px] bg-surface-container-lowest rounded-xl shadow-lg border border-outline-variant py-2 z-[500] flex-col top-[calc(100%+8px)]" id="model-dropdown" style="z-index: 1000;">
+<div class="relative group mx-auto w-fit z-50 overflow-visible" id="model-selector"><div class="hidden absolute left-1/2 -translate-x-1/2 mb-2 w-[200px] bg-surface-container-lowest rounded-xl shadow-lg border border-outline-variant py-2 z-[1000] flex-col top-[calc(100%+8px)]" id="model-dropdown">
 <div class="px-3 py-1.5 text-[11px] text-outline font-label-caps">选择模型</div>
 <button class="w-full flex items-center gap-3 px-4 py-2 bg-primary/10 text-primary text-sm transition-colors text-left">
 <span class="flex-1">DeepSeek V4-flash</span>
@@ -407,7 +233,7 @@
 <!-- Main Input Container -->
 <div class="w-full relative mt-8 shrink-0" id="composer-section">
 <div class="bg-surface-container-lowest border border-outline-variant rounded-[24px] tonal-shadow focus-ring transition-all duration-300 p-2 flex flex-col min-h-[140px]">
-<textarea class="w-full flex-1 bg-transparent border-none resize-none outline-none p-4 font-body-lg text-body-lg text-on-background placeholder:text-outline/70 focus:ring-0" id="chat-input" placeholder="搜索或输入任何内容..." rows="3"></textarea>
+<textarea class="composer-input w-full flex-1 bg-transparent border-none resize-none outline-none p-4 font-body-lg text-body-lg text-on-background placeholder:text-outline/70 focus:ring-0" id="chat-input" placeholder="搜索或输入任何内容..." rows="3"></textarea>
 <!-- Input Toolbar -->
 <div class="flex items-center justify-between px-2 pb-2 mt-auto">
 <div class="flex items-center gap-1 md:gap-2">
@@ -424,7 +250,7 @@
 </button>
 </div>
 <button class="w-10 h-10 rounded-xl bg-primary text-on-primary flex items-center justify-center hover:bg-primary/90 transition-colors active:scale-95 shadow-sm" id="send-message-btn" type="button">
-<span class="material-symbols-outlined" style='font-variation-settings: "FILL" 1;'>arrow_upward</span>
+<span class="material-symbols-outlined material-symbols-filled">arrow_upward</span>
 </button>
 </div>
 </div>
@@ -499,17 +325,6 @@
 <!-- Authenticated app shell -->
 </div>
 <script>
-        // Keep the composer within the fixed chat layout while preserving long-input editing.
-        const MAX_COMPOSER_HEIGHT = 160;
-        const textarea = document.querySelector('textarea');
-        if(textarea) {
-            textarea.addEventListener('input', function() {
-                this.style.height = 'auto';
-                this.style.height = `${Math.min(this.scrollHeight, MAX_COMPOSER_HEIGHT)}px`;
-                this.style.overflowY = this.scrollHeight > MAX_COMPOSER_HEIGHT ? 'auto' : 'hidden';
-            });
-        }
-
         // Enter conversation state after sending a message
         const chatWorkspace = document.getElementById('chat-workspace');
         const welcomeState = document.getElementById('welcome-state');
@@ -686,6 +501,11 @@
 
         function clearAuthenticatedState() {
             currentUser = null;
+            document.querySelectorAll('[data-current-username], [data-current-role]').forEach((element) => {
+                element.textContent = '';
+                element.removeAttribute('title');
+                element.removeAttribute('aria-label');
+            });
             activeRequestController?.abort();
             activeHistoryRequestController?.abort();
             activeHistoryListRequestController?.abort();
@@ -869,8 +689,8 @@
                 if (!element) return;
                 element.disabled = sending;
                 element.setAttribute('aria-busy', String(sending));
-                element.style.opacity = sending ? '0.6' : '';
-                element.style.cursor = sending ? 'wait' : '';
+                element.classList.toggle('opacity-60', sending);
+                element.classList.toggle('cursor-wait', sending);
             });
         }
 
@@ -974,7 +794,7 @@
             } else {
                 const avatar = document.createElement('div');
                 avatar.className = 'w-8 h-8 rounded-lg bg-primary text-on-primary flex items-center justify-center shrink-0 mt-0.5';
-                avatar.innerHTML = '<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: &quot;FILL&quot; 1;">neurology</span>';
+                avatar.innerHTML = '<span class="material-symbols-outlined material-symbols-filled text-[18px]">neurology</span>';
 
                 const answer = document.createElement('div');
                 answer.className = 'rounded-2xl rounded-tl-md bg-surface-container-lowest border border-outline-variant px-4 py-3 text-sm leading-6 tonal-shadow';
@@ -1416,7 +1236,6 @@
             }
             if (chatInput) {
                 chatInput.value = '';
-                chatInput.style.height = 'auto';
             }
             messageThreadCounter = 0;
         }
@@ -1437,7 +1256,6 @@
             chatMessages.appendChild(assistantRow);
             addMessageThreadItem(userMessageId, messageIndex, value);
             chatInput.value = '';
-            chatInput.style.height = 'auto';
             chatThread?.scrollTo({ top: chatThread.scrollHeight, behavior: 'smooth' });
 
             const controller = new AbortController();
@@ -1591,14 +1409,6 @@
             if (!historyActionMenu) return;
 
             closeHistoryActionMenu();
-            const rect = trigger.getBoundingClientRect();
-            const menuWidth = 128;
-            const menuHeight = 152;
-            const left = Math.min(rect.right + 8, window.innerWidth - menuWidth - 8);
-            const top = Math.min(rect.top + rect.height / 2 - 8, window.innerHeight - menuHeight - 8);
-
-            historyActionMenu.style.left = `${Math.max(8, left)}px`;
-            historyActionMenu.style.top = `${Math.max(8, top)}px`;
             historyActionMenu.classList.remove('hidden');
 
             const pinAction = historyActionMenu.querySelector('[data-history-action="pin"]');

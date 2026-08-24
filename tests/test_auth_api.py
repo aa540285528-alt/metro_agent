@@ -15,6 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from metro_agent import api as api_module
 from metro_agent.api import create_app
 from metro_agent.agent_service import AgentRunError
 from metro_agent.auth.dependencies import (
@@ -921,14 +922,58 @@ def test_preview_serves_self_hosted_css_and_strict_script_csp(auth_api) -> None:
     assert "'unsafe-inline'" not in csp.split("script-src", 1)[1].split(";", 1)[0]
     scripts = re.findall(r"<script(?:\s[^>]*)?>(.*?)</script>", page.text, re.DOTALL)
     assert len(scripts) == 1
+    assert "/api/auth/me" in scripts[0]
+    browser_script = scripts[0].replace("\r\n", "\n").replace("\r", "\n")
     script_hash = base64.b64encode(
-        hashlib.sha256(scripts[0].encode("utf-8")).digest()
+        hashlib.sha256(browser_script.encode("utf-8")).digest()
     ).decode("ascii")
     assert f"'sha256-{script_hash}'" in csp
     assert "cdn.tailwindcss.com" not in page.text
+    assert "fonts.googleapis.com" not in page.text
+    assert "fonts.gstatic.com" not in page.text
+    style_sources = csp.split("style-src", 1)[1].split(";", 1)[0]
+    font_sources = csp.split("font-src", 1)[1].split(";", 1)[0]
+    assert style_sources.strip() == "'self'"
+    assert font_sources.strip() == "'self'"
     assert css.status_code == 200
     assert css.headers["content-type"].startswith("text/css")
     assert len(css.content) > 1000
+
+
+def test_csp_hash_uses_browser_normalized_script_newlines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class InMemoryPage:
+        def __init__(self, content: bytes) -> None:
+            self.content = content
+
+        def read_bytes(self) -> bytes:
+            return self.content
+
+    policies = []
+    normalized_script = "\nfetch('/api/auth/me');\n"
+
+    for newline in ("\n", "\r\n"):
+        script = normalized_script.replace("\n", newline)
+        page = InMemoryPage(f"<html><script>{script}</script></html>".encode())
+        monkeypatch.setattr(api_module, "PAGE_PATH", page)
+        policies.append(api_module.build_page_content_security_policy())
+
+    expected_hash = base64.b64encode(
+        hashlib.sha256(normalized_script.encode("utf-8")).digest()
+    ).decode("ascii")
+    assert policies[0] == policies[1]
+    assert f"'sha256-{expected_hash}'" in policies[0]
+
+
+def test_preview_serves_self_hosted_material_symbols_font(auth_api) -> None:
+    response = auth_api.client.get(
+        "/static/fonts/material-symbols-outlined.woff2"
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("font/woff2")
+    assert len(response.content) > 10_000
 
 
 def test_old_monitoring_user_id_is_explicitly_rejected(auth_api) -> None:

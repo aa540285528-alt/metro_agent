@@ -91,6 +91,34 @@ def test_preview_uses_build_time_self_hosted_tailwind() -> None:
     assert "static/*.css" in package_data
 
 
+def test_preview_self_hosts_material_symbols_and_uses_system_text_fonts() -> None:
+    html = _preview()
+    root = PREVIEW_PATH.parents[3]
+    input_css = (root / "src/metro_agent/static/tailwind.input.css").read_text(
+        encoding="utf-8"
+    )
+    tailwind_config = (root / "tailwind.config.js").read_text(encoding="utf-8")
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    package_data = project["tool"]["setuptools"]["package-data"]["metro_agent"]
+    font_path = root / "src/metro_agent/static/fonts/material-symbols-outlined.woff2"
+
+    assert "fonts.googleapis.com" not in html
+    assert "fonts.gstatic.com" not in html
+    assert 'rel="preconnect"' not in html
+    assert "<style" not in html
+    assert "style=" not in html
+    assert ".style." not in _inline_application_script()
+    assert "@font-face" in input_css
+    assert "Material Symbols Outlined" in input_css
+    assert "/static/fonts/material-symbols-outlined.woff2" in input_css
+    assert "Inter" not in tailwind_config
+    assert "Geist" not in tailwind_config
+    assert "ui-sans-serif" in tailwind_config
+    assert "ui-monospace" in tailwind_config
+    assert "static/fonts/*.woff2" in package_data
+    assert font_path.stat().st_size > 10_000
+
+
 def test_preview_keeps_only_thread_working_state_in_local_storage() -> None:
     script = _inline_application_script()
 
@@ -270,6 +298,19 @@ def test_auth_cleanup_restores_a_blank_welcome_workspace() -> None:
     assert "welcomeState?.classList.remove('hidden')" in cleanup
     assert "chatThread?.classList.add('hidden')" in cleanup
     assert "monitoringWorkspace?.classList.add('hidden')" in cleanup
+
+
+def test_auth_cleanup_removes_previous_identity_from_hidden_dom() -> None:
+    script = _inline_application_script()
+    cleanup = script.split("function clearAuthenticatedState()", 1)[1].split(
+        "async function apiFetch", 1
+    )[0]
+
+    assert "[data-current-username]" in cleanup
+    assert "[data-current-role]" in cleanup
+    assert "element.textContent = ''" in cleanup
+    assert "element.removeAttribute('title')" in cleanup
+    assert "element.removeAttribute('aria-label')" in cleanup
 
 
 def test_auth_cleanup_removes_all_transient_dom_state() -> None:
