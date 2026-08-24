@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from metro_agent.storage.history.models import Conversation, ConversationMessage
@@ -112,13 +113,38 @@ class ConversationHistoryService:
             session.flush()
             return self._to_summary(conversation)
 
-    def ensure_thread_available(self, thread_id: str, owner_id: str) -> None:
-        with self._session_factory() as session:
-            stored_owner = session.scalar(
-                select(Conversation.owner_id).where(Conversation.id == thread_id)
-            )
-        if stored_owner is not None and stored_owner != owner_id:
-            raise ConversationNotFound(thread_id)
+    def claim_thread(
+        self,
+        thread_id: str,
+        owner_id: str,
+        initial_content: str,
+    ) -> None:
+        normalized_content = " ".join(initial_content.split())
+        if not normalized_content:
+            raise ValueError("initial conversation content must not be blank")
+
+        try:
+            with self._session_factory.begin() as session:
+                conversation = session.get(Conversation, thread_id)
+                if conversation is not None:
+                    if conversation.owner_id != owner_id:
+                        raise ConversationNotFound(thread_id)
+                    return
+                session.add(
+                    Conversation(
+                        id=thread_id,
+                        owner_id=owner_id,
+                        title=normalized_content[:40],
+                    )
+                )
+                session.flush()
+        except IntegrityError:
+            with self._session_factory() as session:
+                conversation = session.get(Conversation, thread_id)
+                if conversation is None:
+                    raise
+                if conversation.owner_id != owner_id:
+                    raise ConversationNotFound(thread_id) from None
 
     def list_conversations(self, owner_id: str) -> list[ConversationSummary]:
         with self._session_factory() as session:

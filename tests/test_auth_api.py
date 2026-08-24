@@ -6,10 +6,12 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from metro_agent.api import create_app
+from metro_agent.agent_service import AgentRunError
 from metro_agent.auth.dependencies import (
     CurrentUser,
     auth_checkpoint_thread_id,
@@ -80,15 +82,22 @@ class FakeHistoryService:
     def __init__(self) -> None:
         self.conversations: dict[tuple[str, str], dict] = {}
         self.recorded_owners: list[str] = []
-        self.available_checks: list[tuple[str, str]] = []
+        self.claim_calls: list[tuple[str, str, str]] = []
 
-    def ensure_thread_available(self, thread_id: str, owner_id: str) -> None:
-        self.available_checks.append((thread_id, owner_id))
-        if any(
-            stored_thread == thread_id and stored_owner != owner_id
-            for stored_owner, stored_thread in self.conversations
-        ):
-            raise ConversationNotFound(thread_id)
+    def claim_thread(
+        self, thread_id: str, owner_id: str, initial_content: str
+    ) -> None:
+        self.claim_calls.append((thread_id, owner_id, initial_content))
+        for (stored_owner, stored_thread), _conversation in self.conversations.items():
+            if stored_thread == thread_id:
+                if stored_owner != owner_id:
+                    raise ConversationNotFound(thread_id)
+                return
+        self.conversations[(owner_id, thread_id)] = {
+            "id": thread_id,
+            "title": " ".join(initial_content.split())[:40],
+            "is_pinned": False,
+        }
 
     def list_conversations(self, owner_id: str) -> list[dict]:
         return [
@@ -152,6 +161,24 @@ class RecordingChatRunner:
 class FakeMonitoringService:
     def summary(self, _filters):
         return {"trace_count": 0}
+
+
+class FailingLogoutAuthService:
+    def __init__(self, *, resolve_error=None, revoke_error=None) -> None:
+        self.resolve_error = resolve_error
+        self.revoke_error = revoke_error
+        self.user = SimpleNamespace(id=7, username="operator", role="user")
+        self.revoke_calls = 0
+
+    def resolve_session(self, _raw_token: str):
+        if self.resolve_error is not None:
+            raise self.resolve_error
+        return self.user
+
+    def revoke_session(self, *_args) -> None:
+        self.revoke_calls += 1
+        if self.revoke_error is not None:
+            raise self.revoke_error
 
 
 @pytest.fixture
@@ -338,6 +365,56 @@ def test_logout_is_idempotent_for_disabled_user_cookie(auth_api) -> None:
     assert auth_api.client.cookies.get("metro_session") is None
 
 
+@pytest.mark.parametrize(
+    ("stage", "error"),
+    [
+        ("resolve", RuntimeError("auth database unavailable")),
+        ("resolve", SQLAlchemyError("auth database unavailable")),
+        ("revoke", RuntimeError("auth database unavailable")),
+        ("revoke", SQLAlchemyError("auth database unavailable")),
+    ],
+)
+def test_logout_propagates_database_and_transaction_failures(
+    auth_api, stage: str, error: Exception
+) -> None:
+    fake = FailingLogoutAuthService(
+        resolve_error=error if stage == "resolve" else None,
+        revoke_error=error if stage == "revoke" else None,
+    )
+    with TestClient(auth_api.app, raise_server_exceptions=False) as client:
+        auth_api.app.state.auth_service = fake
+        client.cookies.set(
+            "metro_session",
+            "still-active",
+            domain="testserver.local",
+            path="/",
+        )
+
+        response = client.post("/api/auth/logout")
+
+        assert response.status_code == 500
+        assert "set-cookie" not in response.headers
+        assert client.cookies.get("metro_session") == "still-active"
+
+
+def test_logout_tolerates_concurrent_missing_session_during_revoke(auth_api) -> None:
+    fake = FailingLogoutAuthService(revoke_error=ValueError("session not found"))
+    with TestClient(auth_api.app) as client:
+        auth_api.app.state.auth_service = fake
+        client.cookies.set(
+            "metro_session",
+            "concurrently-revoked",
+            domain="testserver.local",
+            path="/",
+        )
+
+        response = client.post("/api/auth/logout")
+
+        assert response.status_code == 204
+        assert fake.revoke_calls == 1
+        assert client.cookies.get("metro_session") is None
+
+
 def test_regular_user_cannot_access_admin_or_monitoring(auth_api) -> None:
     assert login(auth_api.client, "operator", "CorrectHorseBattery2").status_code == 200
 
@@ -370,7 +447,7 @@ def test_chat_rejects_user_id_and_uses_authenticated_owner(auth_api) -> None:
     assert accepted.status_code == 200
     owner_subject = auth_owner_subject(auth_api.user.id)
     assert auth_api.history.recorded_owners == [owner_subject]
-    assert auth_api.history.available_checks == [("t1", owner_subject)]
+    assert auth_api.history.claim_calls == [("t1", owner_subject, "hello")]
     assert auth_api.runner.calls == [
         {
             "thread_id": auth_checkpoint_thread_id(owner_subject, "t1"),
@@ -430,6 +507,39 @@ def test_attacker_reusing_owned_thread_is_rejected_before_runner(auth_api) -> No
         assert auth_api.runner.calls == []
     finally:
         attacker.close()
+
+
+def test_only_claim_winner_enters_runner_when_new_thread_competes(auth_api) -> None:
+    first = independent_client(auth_api.app)
+    second = independent_client(auth_api.app)
+
+    def fail_agent() -> None:
+        raise AgentRunError("simulated agent failure")
+
+    auth_api.runner.on_call = fail_agent
+    try:
+        assert login(first, "operator", "CorrectHorseBattery2").status_code == 200
+        assert login(second, "second.user", "CorrectHorseBattery3").status_code == 200
+
+        winner = first.post(
+            "/api/chat/stream",
+            json={"thread_id": "new-race", "message": "first claim"},
+        )
+        loser = second.post(
+            "/api/chat/stream",
+            json={"thread_id": "new-race", "message": "second claim"},
+        )
+
+        assert winner.status_code == 200
+        assert "event: error" in winner.text
+        assert loser.status_code == 404
+        assert len(auth_api.runner.calls) == 1
+        winner_owner = auth_owner_subject(auth_api.user.id)
+        assert (winner_owner, "new-race") in auth_api.history.conversations
+        assert auth_api.history.recorded_owners == []
+    finally:
+        first.close()
+        second.close()
 
 
 def test_stream_rechecks_session_before_calling_runner(
@@ -667,6 +777,74 @@ def test_same_origin_and_missing_origin_are_allowed(auth_api) -> None:
         json={"username": "operator", "password": "CorrectHorseBattery2"},
     )
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "origin",
+    ["HTTP://TESTSERVER:80", "http://testserver:80"],
+)
+def test_same_origin_normalizes_case_and_default_http_port(
+    auth_api, origin: str
+) -> None:
+    response = auth_api.client.post(
+        "/api/auth/login",
+        headers={"Origin": origin},
+        json={"username": "operator", "password": "CorrectHorseBattery2"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_same_origin_normalizes_default_https_port(auth_api) -> None:
+    secure_app = create_app(
+        graph_factory=lambda: object(),
+        history_service_factory=lambda: auth_api.history,
+        monitoring_service_factory=lambda: FakeMonitoringService(),
+        auth_service_factory=lambda: auth_api.service,
+        chat_runner=auth_api.runner,
+    )
+    with TestClient(secure_app, base_url="https://testserver") as client:
+        response = client.post(
+            "/api/auth/login",
+            headers={"Origin": "HTTPS://TESTSERVER:443"},
+            json={"username": "operator", "password": "CorrectHorseBattery2"},
+        )
+
+    assert response.status_code == 200
+
+
+def test_same_origin_rejects_different_port(auth_api) -> None:
+    response = auth_api.client.post(
+        "/api/auth/login",
+        headers={"Origin": "http://testserver:81"},
+        json={"username": "operator", "password": "CorrectHorseBattery2"},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "null",
+        "not-a-url",
+        "http:///missing-host",
+        "file://testserver",
+        "http://testserver/path",
+        "http://user@testserver",
+        "http://testserver:",
+    ],
+)
+def test_same_origin_rejects_invalid_or_hostless_origin(
+    auth_api, origin: str
+) -> None:
+    response = auth_api.client.post(
+        "/api/auth/login",
+        headers={"Origin": origin},
+        json={"username": "operator", "password": "CorrectHorseBattery2"},
+    )
+
+    assert response.status_code == 403
 
 
 def test_openapi_declares_cookie_security_and_sse_contract(auth_api) -> None:

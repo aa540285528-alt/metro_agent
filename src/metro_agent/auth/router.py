@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 from datetime import timedelta
 from typing import Annotated
@@ -16,9 +15,6 @@ from metro_agent.auth.dependencies import (
     require_admin,
     require_same_origin,
 )
-
-
-logger = logging.getLogger(__name__)
 
 
 class LoginRequest(BaseModel):
@@ -123,19 +119,17 @@ def create_auth_router(
         metro_session: Annotated[str | None, Depends(get_session_token)],
     ) -> Response:
         if metro_session is not None:
-            try:
-                user = request.app.state.auth_service.resolve_session(metro_session)
-                if user is not None:
+            user = request.app.state.auth_service.resolve_session(metro_session)
+            if user is not None:
+                try:
                     request.app.state.auth_service.revoke_session(
                         metro_session,
                         user.id,
                         user.id,
                     )
-            except Exception as exc:
-                logger.warning(
-                    "operation=logout_revoke status=ignored error_type=%s",
-                    type(exc).__name__,
-                )
+                except ValueError as exc:
+                    if str(exc) not in {"session not found", "user not found"}:
+                        raise
         response = Response(status_code=status.HTTP_204_NO_CONTENT)
         response.delete_cookie(
             key=SESSION_COOKIE_NAME,

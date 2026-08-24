@@ -298,8 +298,10 @@ def create_app(
     ) -> StreamingResponse:
         owner_subject = auth_owner_subject(current_user.id)
         try:
-            request.app.state.history_service.ensure_thread_available(
-                payload.thread_id, owner_subject
+            request.app.state.history_service.claim_thread(
+                payload.thread_id,
+                owner_subject,
+                payload.message,
             )
         except ConversationNotFound as exc:
             raise HTTPException(

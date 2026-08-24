@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request, Security
 from fastapi.security import APIKeyCookie
@@ -52,9 +53,40 @@ def get_session_token(
 
 def require_same_origin(request: Request) -> None:
     origin = request.headers.get("origin")
-    expected_origin = f"{request.url.scheme}://{request.url.netloc}"
-    if origin is not None and origin != expected_origin:
+    if origin is None:
+        return
+    supplied_origin = _normalized_http_origin(origin, allow_path=False)
+    request_origin = _normalized_http_origin(str(request.base_url), allow_path=True)
+    if supplied_origin is None or supplied_origin != request_origin:
         raise HTTPException(status_code=403, detail="Cross-origin request forbidden")
+
+
+def _normalized_http_origin(
+    value: str,
+    *,
+    allow_path: bool,
+) -> tuple[str, str, int] | None:
+    if value != value.strip():
+        return None
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    scheme = parsed.scheme.lower()
+    hostname = parsed.hostname
+    if scheme not in {"http", "https"} or hostname is None:
+        return None
+    if parsed.netloc.endswith(":"):
+        return None
+    if parsed.username is not None or parsed.password is not None:
+        return None
+    if parsed.query or parsed.fragment:
+        return None
+    if not allow_path and parsed.path:
+        return None
+    effective_port = port if port is not None else (80 if scheme == "http" else 443)
+    return scheme, hostname.lower(), effective_port
 
 
 def require_admin(

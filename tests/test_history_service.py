@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -27,20 +28,29 @@ def history_service():
         engine.dispose()
 
 
-def test_thread_availability_allows_owner_and_unknown_thread(history_service) -> None:
+def test_claim_thread_creates_owned_placeholder_before_agent_runs(
+    history_service,
+) -> None:
+    service, factory = history_service
+
+    service.claim_thread("thread-1", "auth:1", "  first   question  ")
+
+    with factory() as session:
+        conversation = session.get(Conversation, "thread-1")
+        assert conversation is not None
+        assert conversation.owner_id == "auth:1"
+        assert conversation.title == "first question"
+        assert conversation.messages == []
+
+    service.claim_thread("thread-1", "auth:1", "ignored replacement title")
+
+
+def test_claim_thread_rejects_other_owner(history_service) -> None:
     service, _factory = history_service
-    service.record_turn("thread-1", "auth:1", "question", "answer")
-
-    service.ensure_thread_available("thread-1", "auth:1")
-    service.ensure_thread_available("new-thread", "auth:2")
-
-
-def test_thread_availability_rejects_other_owner(history_service) -> None:
-    service, _factory = history_service
-    service.record_turn("thread-1", "auth:1", "question", "answer")
+    service.claim_thread("thread-1", "auth:1", "question")
 
     with pytest.raises(ConversationNotFound):
-        service.ensure_thread_available("thread-1", "auth:2")
+        service.claim_thread("thread-1", "auth:2", "other question")
 
 
 def test_prefixed_owner_does_not_inherit_legacy_numeric_owner(history_service) -> None:
@@ -56,4 +66,48 @@ def test_prefixed_owner_does_not_inherit_legacy_numeric_owner(history_service) -
         )
 
     with pytest.raises(ConversationNotFound):
-        service.ensure_thread_available("legacy-thread", "auth:1")
+        service.claim_thread("legacy-thread", "auth:1", "new question")
+
+
+def test_claim_thread_rechecks_owner_after_unique_key_race() -> None:
+    competing = Conversation(
+        id="raced-thread",
+        owner_id="auth:2",
+        title="winner",
+    )
+
+    class InsertSession:
+        def get(self, _model, _thread_id):
+            return None
+
+        def add(self, _conversation) -> None:
+            pass
+
+        def flush(self) -> None:
+            raise IntegrityError("insert", {}, Exception("duplicate"))
+
+    class ReadSession:
+        def get(self, _model, _thread_id):
+            return competing
+
+    class SessionContext:
+        def __init__(self, session) -> None:
+            self.session = session
+
+        def __enter__(self):
+            return self.session
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    class RaceSessionFactory:
+        def begin(self):
+            return SessionContext(InsertSession())
+
+        def __call__(self):
+            return SessionContext(ReadSession())
+
+    service = ConversationHistoryService(RaceSessionFactory())
+
+    with pytest.raises(ConversationNotFound):
+        service.claim_thread("raced-thread", "auth:1", "loser")
