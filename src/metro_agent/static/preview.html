@@ -276,6 +276,42 @@
     </style>
 </head>
 <body class="bg-background text-on-background antialiased flex h-screen overflow-hidden">
+<section class="flex h-full w-full items-center justify-center px-4" id="auth-gate" aria-live="polite">
+<div class="w-full max-w-sm">
+<div class="mb-8 flex items-center justify-center gap-3">
+<div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-on-primary">
+<span class="material-symbols-outlined text-2xl" style='font-variation-settings: "FILL" 1;'>neurology</span>
+</div>
+<h1 class="font-headline-md text-2xl font-bold text-primary">地铁运维助手</h1>
+</div>
+<div class="text-center text-sm text-on-surface-variant" id="auth-loading" role="status">正在验证身份…</div>
+<div class="hidden" id="login-view">
+<form class="rounded-lg border border-outline-variant bg-surface-container-lowest p-6 tonal-shadow" id="login-form">
+<h2 class="text-lg font-semibold text-on-background">内部账号登录</h2>
+<div class="mt-5 space-y-4">
+<div>
+<label class="block text-sm font-medium text-on-surface" for="login-username">用户名</label>
+<input autocomplete="username" class="mt-1.5 w-full rounded-md border-outline-variant bg-surface-container-lowest text-sm focus:border-primary focus:ring-primary" id="login-username" maxlength="128" required type="text"/>
+</div>
+<div>
+<label class="block text-sm font-medium text-on-surface" for="login-password">密码</label>
+<input autocomplete="current-password" class="mt-1.5 w-full rounded-md border-outline-variant bg-surface-container-lowest text-sm focus:border-primary focus:ring-primary" id="login-password" maxlength="1024" required type="password"/>
+</div>
+</div>
+<p aria-live="polite" class="mt-4 hidden text-sm text-error" id="login-error" role="alert"></p>
+<button class="mt-5 flex h-10 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-wait disabled:opacity-60" id="login-submit" type="submit">登录</button>
+</form>
+</div>
+<div class="hidden text-center" id="auth-service-error" role="alert">
+<p class="text-sm text-error">暂时无法连接服务，请稍后重试。</p>
+<button class="mt-4 inline-flex h-9 items-center justify-center gap-2 rounded-md border border-outline-variant px-4 text-sm text-primary hover:bg-surface-container-low" id="auth-retry" type="button">
+<span class="material-symbols-outlined text-[18px]">refresh</span>重试
+</button>
+</div>
+</div>
+</section>
+<div class="hidden h-full w-full" id="app-shell">
+<p aria-live="polite" class="fixed right-4 top-4 z-[1300] hidden rounded-md border border-error/30 bg-surface-container-lowest px-4 py-3 text-sm text-error shadow-lg" id="logout-error" role="alert"></p>
 <!-- SideNavBar -->
 <nav class="hidden md:flex flex-col h-screen w-sidebar-expanded fixed left-0 top-0 bg-surface-container-lowest border-r border-outline-variant z-40 transition-all duration-300" id="sidebar">
 <!-- Expanded Top Section -->
@@ -343,7 +379,10 @@
 <div class="w-8 h-8 rounded-full bg-pink-100 flex items-center justify-center overflow-hidden border border-outline-variant/30 shrink-0">
 <img alt="Avatar" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD7N4UzgFSv-t167YQxpk5_HJgurdOZaMbJPELwgbA_1Gr-BgJiLHPPHm19CakwwHvskqkhl0nd0wsGQ_WpyrN3jGo_ERleovkbj0GMG6TRYRsaxZijVrRECEr_GlGSKiECFTLP2suyaSK56Q2TZf-Qk06eGw2JsGUm7WnLlt1Zfoa-TJPxycPaGeDLJQffhh_Xi3suaqS43wvTDFIyh-4YFfVF47zdSG7jhnJUlEVOE0QwZt-6iVCh"/>
 </div>
-<span class="font-body-md text-sm text-on-surface truncate">李和鱼</span>
+<div class="min-w-0 text-left">
+<span class="block truncate font-body-md text-sm text-on-surface" data-current-username></span>
+<span class="block text-xs text-on-surface-variant" data-current-role></span>
+</div>
 </div>
 <span class="material-symbols-outlined text-outline group-hover:text-on-surface text-[20px] shrink-0">settings</span>
 </button>
@@ -356,19 +395,9 @@
 </div>
 <!-- Popup Menu -->
 <div class="absolute bottom-[110%] left-4 w-[calc(100%-32px)] bg-surface-container-lowest rounded-xl shadow-lg border border-outline-variant py-2 z-50 tonal-shadow hidden" id="user-popup-menu">
-<a class="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-container-low text-on-surface text-sm transition-colors" href="#">
-<span class="material-symbols-outlined text-[18px] text-outline">smartphone</span>下载手机应用
-                </a>
-<a class="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-container-low text-on-surface text-sm transition-colors" href="#">
-<span class="material-symbols-outlined text-[18px] text-outline">settings</span>系统设置
-                </a>
-<a class="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-container-low text-on-surface text-sm transition-colors" href="#">
-<span class="material-symbols-outlined text-[18px] text-outline">help_outline</span>帮助与反馈
-                </a>
-<div class="h-px bg-outline-variant my-1"></div>
-<a class="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-container-low text-on-surface text-sm transition-colors" href="#">
+<button class="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm text-on-surface transition-colors hover:bg-surface-container-low" data-logout-trigger id="logout-button" type="button">
 <span class="material-symbols-outlined text-[18px] text-outline">logout</span>退出登录
-                </a>
+</button>
 </div>
 </div>
 </nav>
@@ -419,8 +448,15 @@
 <h1 class="font-headline-md text-headline-md font-bold text-primary">地铁运维助手</h1>
 </div>
 <div class="flex items-center gap-1">
+<div class="mr-1 min-w-0 text-right leading-tight">
+<span class="block max-w-24 truncate text-xs font-medium text-on-surface" data-current-username></span>
+<span class="block text-[10px] text-on-surface-variant" data-current-role></span>
+</div>
 <button class="p-2 text-on-surface-variant hover:bg-surface-container-low rounded-md" data-monitoring-trigger title="监控页面" type="button">
 <span class="material-symbols-outlined">monitoring</span>
+</button>
+<button class="p-2 text-on-surface-variant hover:bg-surface-container-low rounded-md" data-logout-trigger id="mobile-logout-button" title="退出登录" type="button">
+<span class="material-symbols-outlined">logout</span>
 </button>
 <button class="p-2 text-on-surface-variant hover:bg-surface-container-low rounded-md" id="mobile-menu-btn">
 <span class="material-symbols-outlined">menu</span>
@@ -549,6 +585,8 @@
 </div>
 </div>
 </div>
+<!-- Authenticated app shell -->
+</div>
 <script>
         // Keep the composer within the fixed chat layout while preserving long-input editing.
         const MAX_COMPOSER_HEIGHT = 160;
@@ -586,11 +624,24 @@
         const monitoringTraceLayout = document.getElementById('monitoring-trace-layout');
         const monitoringOnlinePanel = document.getElementById('monitoring-online-panel');
         const monitoringEvaluationPanel = document.getElementById('monitoring-evaluation-panel');
+        const authGate = document.getElementById('auth-gate');
+        const authLoading = document.getElementById('auth-loading');
+        const loginView = document.getElementById('login-view');
+        const authServiceError = document.getElementById('auth-service-error');
+        const authRetry = document.getElementById('auth-retry');
+        const loginForm = document.getElementById('login-form');
+        const loginUsername = document.getElementById('login-username');
+        const loginPassword = document.getElementById('login-password');
+        const loginSubmit = document.getElementById('login-submit');
+        const loginError = document.getElementById('login-error');
+        const appShell = document.getElementById('app-shell');
+        const logoutButtons = document.querySelectorAll('[data-logout-trigger]');
+        const logoutError = document.getElementById('logout-error');
         let messageThreadCounter = 0;
         const STORAGE_KEYS = {
-            userId: 'metro-chat-user-id',
             threadId: 'metro-chat-thread-id'
         };
+        let currentUser = null;
         let activeRequestController = null;
         let isSending = false;
 
@@ -615,8 +666,7 @@
             }
         }
 
-        const browserUserId = getOrCreateStoredId(STORAGE_KEYS.userId);
-        let currentThreadId = getOrCreateStoredId(STORAGE_KEYS.threadId);
+        let currentThreadId = null;
         let historyEntries = [];
         let activeHistoryConversation = null;
         let activeHistoryActionTrigger = null;
@@ -629,6 +679,212 @@
         let activeMonitoringRequestController = null;
         let monitoringData = { summary: null, traces: [], evaluations: [] };
         let activeMonitoringTab = 'traces';
+
+        class UnauthorizedError extends Error {}
+
+        function setAuthGateState(state) {
+            authLoading?.classList.toggle('hidden', state !== 'loading');
+            loginView?.classList.toggle('hidden', state !== 'login');
+            authServiceError?.classList.toggle('hidden', state !== 'error');
+        }
+
+        function showLoginView(message = '') {
+            authGate?.classList.remove('hidden');
+            appShell?.classList.add('hidden');
+            setAuthGateState('login');
+            if (loginError) {
+                loginError.textContent = message;
+                loginError.classList.toggle('hidden', !message);
+            }
+            setTimeout(() => loginUsername?.focus(), 0);
+        }
+
+        function showAuthServiceError() {
+            authGate?.classList.remove('hidden');
+            appShell?.classList.add('hidden');
+            setAuthGateState('error');
+        }
+
+        function isAdmin() {
+            return currentUser?.role === 'admin';
+        }
+
+        function setMonitoringAccess() {
+            const allowed = isAdmin();
+            document.querySelectorAll('[data-monitoring-trigger]').forEach((button) => {
+                button.classList.toggle('hidden', !allowed);
+                button.disabled = !allowed;
+            });
+            if (!allowed && !monitoringWorkspace?.classList.contains('hidden')) {
+                enterChatState();
+            }
+        }
+
+        function clearAuthenticatedState() {
+            currentUser = null;
+            activeRequestController?.abort();
+            activeHistoryRequestController?.abort();
+            activeHistoryListRequestController?.abort();
+            activeMonitoringRequestController?.abort();
+            historyRequestGeneration += 1;
+            historyListRequestGeneration += 1;
+            monitoringRequestGeneration += 1;
+            activeRequestController = null;
+            activeHistoryRequestController = null;
+            activeHistoryListRequestController = null;
+            activeMonitoringRequestController = null;
+            historyEntries = [];
+            activeHistoryConversation = null;
+            monitoringData = { summary: null, traces: [], evaluations: [] };
+            currentThreadId = null;
+            try {
+                localStorage.removeItem(STORAGE_KEYS.threadId);
+            } catch (error) {
+                // In-memory cleanup remains effective when browser storage is unavailable.
+            }
+            historyList?.replaceChildren();
+            chatMessages?.replaceChildren();
+            messageThreadList?.replaceChildren();
+            monitoringKpis?.replaceChildren();
+            monitoringTraceList?.replaceChildren();
+            monitoringTraceDetail?.replaceChildren();
+            monitoringOnlinePanel?.replaceChildren();
+            monitoringEvaluationPanel?.replaceChildren();
+            if (chatInput) chatInput.value = '';
+            messageThreadCounter = 0;
+            monitoringWorkspace?.classList.add('hidden');
+            chatWorkspace?.classList.remove('hidden', 'justify-end');
+            chatWorkspace?.classList.add('justify-center');
+            welcomeState?.classList.remove('hidden');
+            promptSuggestions?.classList.remove('hidden');
+            chatThread?.classList.add('hidden');
+            messageThreadRail?.classList.add('hidden');
+            composerSection?.classList.remove('mt-4', 'mt-24');
+            composerSection?.classList.add('mt-8');
+            renameDialog?.classList.add('hidden');
+            deleteConfirmDialog?.classList.add('hidden');
+            setSending(false);
+            setMonitoringAccess();
+            showLoginView();
+        }
+
+        async function apiFetch(input, options = {}, { handleUnauthorized = true } = {}) {
+            const response = await fetch(input, {
+                ...options,
+                credentials: 'same-origin'
+            });
+            if (response.status === 401 && handleUnauthorized) {
+                clearAuthenticatedState();
+                throw new UnauthorizedError('Authentication required');
+            }
+            return response;
+        }
+
+        async function activateAuthenticatedWorkspace(user) {
+            currentUser = user;
+            currentThreadId = getOrCreateStoredId(STORAGE_KEYS.threadId);
+            document.querySelectorAll('[data-current-username]').forEach((element) => {
+                element.textContent = currentUser.username;
+            });
+            document.querySelectorAll('[data-current-role]').forEach((element) => {
+                element.textContent = currentUser.role === 'admin' ? '管理员' : '用户';
+            });
+            if (logoutError) {
+                logoutError.textContent = '';
+                logoutError.classList.add('hidden');
+            }
+            setMonitoringAccess();
+            authGate?.classList.add('hidden');
+            appShell?.classList.remove('hidden');
+            await loadConversationHistory();
+        }
+
+        async function restoreSession() {
+            setAuthGateState('loading');
+            authGate?.classList.remove('hidden');
+            appShell?.classList.add('hidden');
+            try {
+                const response = await apiFetch('/api/auth/me', {}, { handleUnauthorized: false });
+                if (response.status === 401) {
+                    showLoginView();
+                    return;
+                }
+                if (!response.ok) {
+                    showAuthServiceError();
+                    return;
+                }
+                await activateAuthenticatedWorkspace(await response.json());
+            } catch (error) {
+                console.error('Session restore failed:', error);
+                showAuthServiceError();
+            }
+        }
+
+        async function submitLogin(event) {
+            event.preventDefault();
+            if (!loginUsername || !loginPassword || !loginSubmit) return;
+            const username = loginUsername.value.trim();
+            const password = loginPassword.value;
+            if (!username || !password) return;
+
+            loginSubmit.disabled = true;
+            if (loginError) {
+                loginError.textContent = '';
+                loginError.classList.add('hidden');
+            }
+            try {
+                const response = await apiFetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                }, { handleUnauthorized: false });
+                if (response.status === 401) {
+                    showLoginView('用户名或密码错误');
+                    return;
+                }
+                if (response.status === 429) {
+                    const retryAfter = Number.parseInt(response.headers.get('Retry-After') || '', 10);
+                    showLoginView(Number.isFinite(retryAfter)
+                        ? '登录尝试过多，请稍后再试。'
+                        : '登录暂不可用，请稍后再试。');
+                    return;
+                }
+                if (!response.ok) {
+                    showLoginView('登录失败，请稍后重试。');
+                    return;
+                }
+                loginPassword.value = '';
+                await activateAuthenticatedWorkspace(await response.json());
+            } catch (error) {
+                console.error('Login failed:', error);
+                showLoginView('暂时无法连接服务，请稍后重试。');
+            } finally {
+                loginSubmit.disabled = false;
+            }
+        }
+
+        async function logout() {
+            if (!logoutButtons.length) return;
+            logoutButtons.forEach((button) => { button.disabled = true; });
+            try {
+                const response = await apiFetch('/api/auth/logout', {
+                    method: 'POST'
+                }, { handleUnauthorized: false });
+                if (response.ok || response.status === 401) {
+                    clearAuthenticatedState();
+                    return;
+                }
+                throw new Error(`Logout failed with status ${response.status}.`);
+            } catch (error) {
+                console.error('Logout failed:', error);
+                if (logoutError) {
+                    logoutError.textContent = '退出登录失败，请稍后重试。';
+                    logoutError.classList.remove('hidden');
+                }
+            } finally {
+                logoutButtons.forEach((button) => { button.disabled = false; });
+            }
+        }
 
         function setHistoryError(message) {
             if (!historyError) return;
@@ -774,7 +1030,7 @@
         }
 
         function conversationUrl(threadId) {
-            return `/api/conversations/${encodeURIComponent(threadId)}?user_id=${encodeURIComponent(browserUserId)}`;
+            return `/api/conversations/${encodeURIComponent(threadId)}`;
         }
 
         function historyAgeGroup(updatedAt) {
@@ -850,7 +1106,7 @@
             activeHistoryListRequestController = controller;
 
             try {
-                const response = await fetch(`/api/conversations?user_id=${encodeURIComponent(browserUserId)}`, {
+                const response = await apiFetch('/api/conversations', {
                     signal: controller.signal
                 });
                 if (!response.ok) throw new Error(`History request failed with status ${response.status}.`);
@@ -861,7 +1117,7 @@
                 renderConversationHistory(historyEntries);
                 setHistoryError('');
             } catch (error) {
-                if (requestGeneration !== historyListRequestGeneration || activeHistoryListRequestController !== controller || error.name === 'AbortError') return;
+                if (error instanceof UnauthorizedError || requestGeneration !== historyListRequestGeneration || activeHistoryListRequestController !== controller || error.name === 'AbortError') return;
                 console.error('Conversation history failed:', error);
                 setHistoryError('无法加载对话历史，请稍后重试。');
             } finally {
@@ -902,7 +1158,7 @@
             activeHistoryRequestController = controller;
 
             try {
-                const response = await fetch(conversationUrl(threadId), { signal: controller.signal });
+                const response = await apiFetch(conversationUrl(threadId), { signal: controller.signal });
                 if (!response.ok) throw new Error(`Conversation request failed with status ${response.status}.`);
 
                 const conversation = await response.json();
@@ -917,6 +1173,7 @@
                 enterConversationState();
                 await loadConversationHistory();
             } catch (error) {
+                if (error instanceof UnauthorizedError) return;
                 if (error.name !== 'AbortError' && requestGeneration === historyRequestGeneration) {
                     console.error('Conversation open failed:', error);
                     setHistoryError('无法打开对话，请稍后重试。');
@@ -926,11 +1183,6 @@
                     activeHistoryRequestController = null;
                 }
             }
-        }
-
-        function monitoringUrl(path) {
-            const separator = path.includes('?') ? '&' : '?';
-            return `${path}${separator}user_id=${encodeURIComponent(browserUserId)}`;
         }
 
         function monitoringText(container, message, className = 'text-on-surface-variant') {
@@ -1082,18 +1334,20 @@
         }
 
         async function loadMonitoringTraceDetail(traceId) {
+            if (!isAdmin()) return;
             const requestGeneration = ++monitoringRequestGeneration;
             activeMonitoringRequestController?.abort();
             const controller = new AbortController();
             activeMonitoringRequestController = controller;
             monitoringText(monitoringTraceDetail, '正在加载 Trace 详情…');
             try {
-                const response = await fetch(monitoringUrl(`/api/monitoring/traces/${encodeURIComponent(traceId)}`), { signal: controller.signal });
+                const response = await apiFetch(`/api/monitoring/traces/${encodeURIComponent(traceId)}`, { signal: controller.signal });
                 if (!response.ok) throw new Error(`Trace detail request failed with status ${response.status}.`);
                 const trace = await response.json();
                 if (requestGeneration !== monitoringRequestGeneration || activeMonitoringRequestController !== controller) return;
                 renderMonitoringTraceDetail(trace);
             } catch (error) {
+                if (error instanceof UnauthorizedError) return;
                 if (error.name !== 'AbortError' && requestGeneration === monitoringRequestGeneration) {
                     monitoringText(monitoringTraceDetail, '无法加载 Trace 详情，请稍后重试。', 'text-error');
                 }
@@ -1103,6 +1357,7 @@
         }
 
         async function loadMonitoringData() {
+            if (!isAdmin()) return;
             const requestGeneration = ++monitoringRequestGeneration;
             activeMonitoringRequestController?.abort();
             const controller = new AbortController();
@@ -1111,9 +1366,9 @@
             monitoringText(monitoringTraceDetail, '选择一条 Trace 查看详情。');
             try {
                 const [summaryResponse, tracesResponse, evaluationsResponse] = await Promise.all([
-                    fetch(monitoringUrl('/api/monitoring/summary'), { signal: controller.signal }),
-                    fetch(monitoringUrl('/api/monitoring/traces'), { signal: controller.signal }),
-                    fetch(monitoringUrl('/api/monitoring/evaluations'), { signal: controller.signal })
+                    apiFetch('/api/monitoring/summary', { signal: controller.signal }),
+                    apiFetch('/api/monitoring/traces', { signal: controller.signal }),
+                    apiFetch('/api/monitoring/evaluations', { signal: controller.signal })
                 ]);
                 if (!summaryResponse.ok || !tracesResponse.ok || !evaluationsResponse.ok) {
                     throw new Error('Monitoring request failed.');
@@ -1127,6 +1382,7 @@
                 renderMonitoringTraceList(monitoringData.traces);
                 applyMonitoringTab(activeMonitoringTab);
             } catch (error) {
+                if (error instanceof UnauthorizedError) return;
                 if (error.name !== 'AbortError' && requestGeneration === monitoringRequestGeneration) {
                     monitoringText(monitoringTraceList, '无法加载监控数据，请检查服务后重试。', 'text-error');
                     monitoringText(monitoringTraceDetail, '监控数据不可用。', 'text-error');
@@ -1137,6 +1393,7 @@
         }
 
         function enterMonitoringState() {
+            if (!isAdmin()) return;
             activeRequestController?.abort();
             setSending(false);
             chatWorkspace?.classList.add('hidden');
@@ -1224,12 +1481,11 @@
             let receivedTerminalEvent = false;
 
             try {
-                const response = await fetch('/api/chat/stream', {
+                const response = await apiFetch('/api/chat/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         thread_id: currentThreadId,
-                        user_id: browserUserId,
                         message: value
                     }),
                     signal: controller.signal
@@ -1259,7 +1515,9 @@
                     updateAssistantMessage(assistantRow, '本次请求未返回最终回答，请稍后重试。');
                 }
             } catch (error) {
-                if (error.name === 'AbortError') {
+                if (error instanceof UnauthorizedError) {
+                    return;
+                } else if (error.name === 'AbortError') {
                     updateAssistantMessage(assistantRow, '请求已取消。');
                 } else {
                     console.error('Chat stream failed:', error);
@@ -1280,6 +1538,10 @@
                 submitChatMessage();
             }
         });
+
+        loginForm?.addEventListener('submit', submitLogin);
+        authRetry?.addEventListener('click', restoreSession);
+        logoutButtons.forEach((button) => button.addEventListener('click', logout));
 
         document.querySelectorAll('[data-new-chat-trigger]').forEach((button) => {
             button.addEventListener('click', resetToWelcomeState);
@@ -1416,7 +1678,7 @@
                 return;
             }
             if (action === 'pin') {
-                const response = await fetch(conversationUrl(conversation.id), {
+                const response = await apiFetch(conversationUrl(conversation.id), {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ is_pinned: !conversation.is_pinned })
@@ -1430,7 +1692,7 @@
             const threadId = deleteConfirmDialog?.dataset.threadId;
             if (!threadId) return;
 
-            const response = await fetch(conversationUrl(threadId), { method: 'DELETE' });
+            const response = await apiFetch(conversationUrl(threadId), { method: 'DELETE' });
             if (!response.ok) throw new Error(`Conversation delete failed with status ${response.status}.`);
 
             setDialogVisible(deleteConfirmDialog, false);
@@ -1465,6 +1727,7 @@
             try {
                 await handleHistoryAction(actionButton.dataset.historyAction, opener);
             } catch (error) {
+                if (error instanceof UnauthorizedError) return;
                 console.error('Conversation action failed:', error);
                 setHistoryError('操作失败，请稍后重试。');
             }
@@ -1477,7 +1740,7 @@
             if (!threadId || !title) return;
 
             try {
-                const response = await fetch(conversationUrl(threadId), {
+                const response = await apiFetch(conversationUrl(threadId), {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ title })
@@ -1486,6 +1749,7 @@
                 setDialogVisible(renameDialog, false);
                 await loadConversationHistory();
             } catch (error) {
+                if (error instanceof UnauthorizedError) return;
                 console.error('Conversation rename failed:', error);
                 setHistoryError('重命名失败，请稍后重试。');
             }
@@ -1497,6 +1761,7 @@
             try {
                 await deleteActiveConversation();
             } catch (error) {
+                if (error instanceof UnauthorizedError) return;
                 console.error('Conversation delete failed:', error);
                 setHistoryError('删除失败，请稍后重试。');
             }
@@ -1581,7 +1846,7 @@
             return false;
         }
 
-        loadConversationHistory();
+        restoreSession();
 
         window.addEventListener('keydown', (e) => {
             if (trapHistoryDialogFocus(e)) return;
