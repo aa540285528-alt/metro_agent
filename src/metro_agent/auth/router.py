@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from metro_agent.auth.dependencies import CurrentUser, get_current_user, require_admin
+from metro_agent.auth.dependencies import (
+    SESSION_COOKIE_NAME,
+    CurrentUser,
+    get_current_user,
+    get_session_token,
+    require_admin,
+    require_same_origin,
+)
 
 
-SESSION_COOKIE_NAME = "metro_session"
+logger = logging.getLogger(__name__)
 
 
 class LoginRequest(BaseModel):
@@ -53,7 +61,7 @@ class UpdateUserRequest(BaseModel):
 
 
 def get_auth_cookie_secure() -> bool:
-    value = os.environ.get("AUTH_COOKIE_SECURE", "false").strip().lower()
+    value = os.environ.get("AUTH_COOKIE_SECURE", "true").strip().lower()
     if value not in {"true", "false"}:
         raise ValueError("AUTH_COOKIE_SECURE must be true or false")
     return value == "true"
@@ -77,7 +85,11 @@ def create_auth_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
-    @router.post("/auth/login", response_model=CurrentUserResponse)
+    @router.post(
+        "/auth/login",
+        response_model=CurrentUserResponse,
+        dependencies=[Depends(require_same_origin)],
+    )
     def login(payload: LoginRequest, request: Request, response: Response):
         result = request.app.state.auth_service.login(
             payload.username,
@@ -101,19 +113,29 @@ def create_auth_router(
         )
         return CurrentUserResponse(id=user.id, username=user.username, role=user.role)
 
-    @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+    @router.post(
+        "/auth/logout",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(require_same_origin)],
+    )
     def logout(
         request: Request,
-        current_user: Annotated[CurrentUser, Depends(get_current_user)],
-        metro_session: Annotated[str | None, Cookie()] = None,
+        metro_session: Annotated[str | None, Depends(get_session_token)],
     ) -> Response:
-        if metro_session is None:
-            raise HTTPException(status_code=401, detail="Not authenticated")
-        request.app.state.auth_service.revoke_session(
-            metro_session,
-            current_user.id,
-            current_user.id,
-        )
+        if metro_session is not None:
+            try:
+                user = request.app.state.auth_service.resolve_session(metro_session)
+                if user is not None:
+                    request.app.state.auth_service.revoke_session(
+                        metro_session,
+                        user.id,
+                        user.id,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "operation=logout_revoke status=ignored error_type=%s",
+                    type(exc).__name__,
+                )
         response = Response(status_code=status.HTTP_204_NO_CONTENT)
         response.delete_cookie(
             key=SESSION_COOKIE_NAME,
@@ -134,6 +156,7 @@ def create_auth_router(
         "/admin/users",
         response_model=AdminUserResponse,
         status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(require_same_origin)],
     )
     def create_user(
         payload: CreateUserRequest,
@@ -161,7 +184,11 @@ def create_auth_router(
             for user in request.app.state.auth_service.list_users()
         ]
 
-    @router.patch("/admin/users/{user_id}", response_model=AdminUserResponse)
+    @router.patch(
+        "/admin/users/{user_id}",
+        response_model=AdminUserResponse,
+        dependencies=[Depends(require_same_origin)],
+    )
     def update_user(
         user_id: int,
         payload: UpdateUserRequest,

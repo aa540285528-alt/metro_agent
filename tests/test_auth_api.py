@@ -10,8 +10,15 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from metro_agent.api import create_app
-from metro_agent.auth.dependencies import CurrentUser, get_current_user, require_admin
+from metro_agent.auth.dependencies import (
+    CurrentUser,
+    auth_checkpoint_thread_id,
+    auth_owner_subject,
+    get_current_user,
+    require_admin,
+)
 from metro_agent.auth.models import AuthBase
+from metro_agent.auth.router import get_auth_cookie_secure
 from metro_agent.auth.service import AuthService
 from metro_agent.storage.history.service import ConversationNotFound
 
@@ -73,6 +80,15 @@ class FakeHistoryService:
     def __init__(self) -> None:
         self.conversations: dict[tuple[str, str], dict] = {}
         self.recorded_owners: list[str] = []
+        self.available_checks: list[tuple[str, str]] = []
+
+    def ensure_thread_available(self, thread_id: str, owner_id: str) -> None:
+        self.available_checks.append((thread_id, owner_id))
+        if any(
+            stored_thread == thread_id and stored_owner != owner_id
+            for stored_owner, stored_thread in self.conversations
+        ):
+            raise ConversationNotFound(thread_id)
 
     def list_conversations(self, owner_id: str) -> list[dict]:
         return [
@@ -121,6 +137,23 @@ class FakeHistoryService:
         }
 
 
+class RecordingChatRunner:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self.on_call = None
+
+    def __call__(self, _graph, **kwargs) -> str:
+        self.calls.append(kwargs)
+        if self.on_call is not None:
+            self.on_call()
+        return "answer"
+
+
+class FakeMonitoringService:
+    def summary(self, _filters):
+        return {"trace_count": 0}
+
+
 @pytest.fixture
 def auth_api(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("AUTH_COOKIE_SECURE", "false")
@@ -150,12 +183,13 @@ def auth_api(monkeypatch: pytest.MonkeyPatch):
         "second.user", "CorrectHorseBattery3", "user", admin.id
     )
     history = FakeHistoryService()
+    runner = RecordingChatRunner()
     app = create_app(
         graph_factory=lambda: object(),
         history_service_factory=lambda: history,
-        monitoring_service_factory=lambda: SimpleNamespace(),
+        monitoring_service_factory=lambda: FakeMonitoringService(),
         auth_service_factory=lambda: auth_service,
-        chat_runner=lambda *_args, **_kwargs: "answer",
+        chat_runner=runner,
     )
     with TestClient(app) as client:
         yield SimpleNamespace(
@@ -163,6 +197,7 @@ def auth_api(monkeypatch: pytest.MonkeyPatch):
             client=client,
             service=auth_service,
             history=history,
+            runner=runner,
             admin=admin,
             user=user,
             other=other,
@@ -225,6 +260,16 @@ def test_login_cookie_uses_secure_attribute_when_configured(
     assert "Secure" in response.headers["set-cookie"]
 
 
+def test_cookie_secure_defaults_true_and_allows_explicit_local_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AUTH_COOKIE_SECURE", raising=False)
+    assert get_auth_cookie_secure() is True
+
+    monkeypatch.setenv("AUTH_COOKIE_SECURE", "false")
+    assert get_auth_cookie_secure() is False
+
+
 def test_login_failure_is_generic(auth_api) -> None:
     wrong_password = login(auth_api.client, "operator", "WrongPassword9")
     missing_user = login(auth_api.client, "missing", "WrongPassword9")
@@ -246,6 +291,51 @@ def test_logout_revokes_cookie_and_future_requests(auth_api) -> None:
     assert response.status_code == 204
     assert "metro_session=" in response.headers["set-cookie"]
     assert auth_api.client.get("/api/auth/me").status_code == 401
+
+
+@pytest.mark.parametrize("cookie_value", [None, "invalid-or-expired-token"])
+def test_logout_is_idempotent_for_missing_or_invalid_cookie(
+    auth_api, cookie_value: str | None
+) -> None:
+    if cookie_value is not None:
+        auth_api.client.cookies.set(
+            "metro_session",
+            cookie_value,
+            domain="testserver.local",
+            path="/",
+        )
+
+    response = auth_api.client.post("/api/auth/logout")
+
+    assert response.status_code == 204
+    assert "metro_session=" in response.headers["set-cookie"]
+    assert auth_api.client.cookies.get("metro_session") is None
+
+
+def test_logout_is_idempotent_for_revoked_cookie(auth_api) -> None:
+    assert login(auth_api.client, "operator", "CorrectHorseBattery2").status_code == 200
+    token = auth_api.client.cookies.get("metro_session")
+    assert token is not None
+    auth_api.service.revoke_session(token, auth_api.user.id, auth_api.user.id)
+
+    response = auth_api.client.post("/api/auth/logout")
+
+    assert response.status_code == 204
+    assert auth_api.client.cookies.get("metro_session") is None
+
+
+def test_logout_is_idempotent_for_disabled_user_cookie(auth_api) -> None:
+    assert login(auth_api.client, "operator", "CorrectHorseBattery2").status_code == 200
+    auth_api.service.update_user(
+        auth_api.user.id,
+        auth_api.admin.id,
+        is_active=False,
+    )
+
+    response = auth_api.client.post("/api/auth/logout")
+
+    assert response.status_code == 204
+    assert auth_api.client.cookies.get("metro_session") is None
 
 
 def test_regular_user_cannot_access_admin_or_monitoring(auth_api) -> None:
@@ -278,14 +368,23 @@ def test_chat_rejects_user_id_and_uses_authenticated_owner(auth_api) -> None:
 
     assert rejected.status_code == 422
     assert accepted.status_code == 200
-    assert auth_api.history.recorded_owners == [str(auth_api.user.id)]
+    owner_subject = auth_owner_subject(auth_api.user.id)
+    assert auth_api.history.recorded_owners == [owner_subject]
+    assert auth_api.history.available_checks == [("t1", owner_subject)]
+    assert auth_api.runner.calls == [
+        {
+            "thread_id": auth_checkpoint_thread_id(owner_subject, "t1"),
+            "user_id": owner_subject,
+            "message": "hello",
+        }
+    ]
     schema = auth_api.app.openapi()["components"]["schemas"]["ChatRequest"]
     assert "user_id" not in schema["properties"]
     assert schema["additionalProperties"] is False
 
 
 def test_conversations_are_isolated_by_authenticated_user(auth_api) -> None:
-    owner_id = str(auth_api.user.id)
+    owner_id = auth_owner_subject(auth_api.user.id)
     auth_api.history.conversations[(owner_id, "private-thread")] = {
         "id": "private-thread",
         "title": "private",
@@ -309,6 +408,77 @@ def test_conversations_are_isolated_by_authenticated_user(auth_api) -> None:
     finally:
         first.close()
         second.close()
+
+
+def test_attacker_reusing_owned_thread_is_rejected_before_runner(auth_api) -> None:
+    owner = auth_owner_subject(auth_api.user.id)
+    auth_api.history.conversations[(owner, "claimed-thread")] = {
+        "id": "claimed-thread",
+        "title": "private",
+        "is_pinned": False,
+    }
+    attacker = independent_client(auth_api.app)
+    try:
+        assert login(attacker, "second.user", "CorrectHorseBattery3").status_code == 200
+
+        response = attacker.post(
+            "/api/chat/stream",
+            json={"thread_id": "claimed-thread", "message": "steal context"},
+        )
+
+        assert response.status_code == 404
+        assert auth_api.runner.calls == []
+    finally:
+        attacker.close()
+
+
+def test_stream_rechecks_session_before_calling_runner(
+    auth_api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert login(auth_api.client, "operator", "CorrectHorseBattery2").status_code == 200
+    original_resolve = auth_api.service.resolve_session
+    resolve_count = 0
+
+    def expire_after_route_authentication(raw_token: str):
+        nonlocal resolve_count
+        resolve_count += 1
+        if resolve_count == 1:
+            return original_resolve(raw_token)
+        return None
+
+    monkeypatch.setattr(
+        auth_api.service, "resolve_session", expire_after_route_authentication
+    )
+
+    response = auth_api.client.post(
+        "/api/chat/stream", json={"thread_id": "delayed", "message": "hello"}
+    )
+
+    assert response.status_code == 200
+    assert "event: error" in response.text
+    assert auth_api.runner.calls == []
+    assert auth_api.history.recorded_owners == []
+
+
+def test_stream_does_not_write_history_when_user_disabled_during_runner(
+    auth_api,
+) -> None:
+    assert login(auth_api.client, "operator", "CorrectHorseBattery2").status_code == 200
+    auth_api.runner.on_call = lambda: auth_api.service.update_user(
+        auth_api.user.id,
+        auth_api.admin.id,
+        is_active=False,
+    )
+
+    response = auth_api.client.post(
+        "/api/chat/stream", json={"thread_id": "disable-mid-run", "message": "hello"}
+    )
+
+    assert response.status_code == 200
+    assert "event: error" in response.text
+    assert "event: final" not in response.text
+    assert len(auth_api.runner.calls) == 1
+    assert auth_api.history.recorded_owners == []
 
 
 def test_admin_user_management_is_safe_and_disabling_invalidates_cookie(
@@ -379,6 +549,26 @@ def test_admin_multi_field_update_is_atomic(auth_api) -> None:
     )
 
 
+@pytest.mark.parametrize("changes", [{"is_active": False}, {"role": "user"}])
+def test_admin_cannot_lock_out_own_management_access(auth_api, changes: dict) -> None:
+    assert (
+        login(auth_api.client, "metro.admin", "CorrectHorseBattery1").status_code
+        == 200
+    )
+
+    response = auth_api.client.patch(
+        f"/api/admin/users/{auth_api.admin.id}", json=changes
+    )
+
+    stored = next(
+        user for user in auth_api.service.list_users() if user.id == auth_api.admin.id
+    )
+    assert response.status_code == 422
+    assert stored.is_active is True
+    assert stored.role == "admin"
+    assert auth_api.client.get("/api/admin/users").status_code == 200
+
+
 def test_login_uses_atomic_auth_service_method(auth_api, monkeypatch) -> None:
     calls = []
     original_login = auth_api.service.login
@@ -406,3 +596,89 @@ def test_openapi_has_no_client_supplied_monitoring_user_id(auth_api) -> None:
     )
 
     assert "user_id" not in {parameter["name"] for parameter in parameters}
+
+
+def test_old_monitoring_user_id_is_explicitly_rejected(auth_api) -> None:
+    assert (
+        login(auth_api.client, "metro.admin", "CorrectHorseBattery1").status_code
+        == 200
+    )
+
+    response = auth_api.client.get(
+        "/api/monitoring/summary", params={"user_id": "legacy-owner"}
+    )
+
+    assert response.status_code == 422
+
+
+def test_cross_origin_state_changes_are_rejected(auth_api) -> None:
+    cross_origin = {"Origin": "https://attacker.example"}
+    assert (
+        auth_api.client.post(
+            "/api/auth/login",
+            headers=cross_origin,
+            json={"username": "operator", "password": "CorrectHorseBattery2"},
+        ).status_code
+        == 403
+    )
+
+    assert (
+        login(auth_api.client, "metro.admin", "CorrectHorseBattery1").status_code
+        == 200
+    )
+    requests = [
+        ("POST", "/api/auth/logout", None),
+        (
+            "POST",
+            "/api/admin/users",
+            {
+                "username": "blocked.user",
+                "password": "CorrectHorseBattery9",
+                "role": "user",
+            },
+        ),
+        ("PATCH", f"/api/admin/users/{auth_api.user.id}", {"role": "user"}),
+        ("PATCH", "/api/conversations/missing", {"title": "blocked"}),
+        ("DELETE", "/api/conversations/missing", None),
+        ("POST", "/api/chat/stream", {"thread_id": "t1", "message": "blocked"}),
+    ]
+    for method, path, body in requests:
+        response = auth_api.client.request(
+            method,
+            path,
+            headers=cross_origin,
+            json=body,
+        )
+        assert response.status_code == 403, (method, path, response.text)
+
+
+def test_same_origin_and_missing_origin_are_allowed(auth_api) -> None:
+    same_origin = login(
+        auth_api.client,
+        "operator",
+        "CorrectHorseBattery2",
+    )
+    assert same_origin.status_code == 200
+
+    auth_api.client.cookies.clear()
+    response = auth_api.client.post(
+        "/api/auth/login",
+        headers={"Origin": "http://testserver"},
+        json={"username": "operator", "password": "CorrectHorseBattery2"},
+    )
+    assert response.status_code == 200
+
+
+def test_openapi_declares_cookie_security_and_sse_contract(auth_api) -> None:
+    schema = auth_api.app.openapi()
+    cookie_scheme = schema["components"]["securitySchemes"]["MetroSessionCookie"]
+    assert cookie_scheme == {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "metro_session",
+    }
+
+    chat_operation = schema["paths"]["/api/chat/stream"]["post"]
+    assert {"MetroSessionCookie": []} in chat_operation["security"]
+    assert "text/event-stream" in chat_operation["responses"]["200"]["content"]
+    assert {"401", "403"}.issubset(chat_operation["responses"])

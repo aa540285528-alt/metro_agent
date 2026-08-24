@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -290,8 +290,18 @@ class AuthService:
         now = utc_now_naive()
 
         with self._session_factory.begin() as session:
-            users = self._lock_users_for_update(session, user_id, actor_user_id)
+            users, active_admins = self._lock_admin_update_users(
+                session, user_id, actor_user_id
+            )
             user = users[user_id]
+
+            invalidates_admin = user.role == "admin" and user.is_active and (
+                is_active is False or (role is not None and role != "admin")
+            )
+            if actor_user_id == user_id and invalidates_admin:
+                raise ValueError("current admin cannot be disabled or demoted")
+            if invalidates_admin and len(active_admins) == 1:
+                raise ValueError("last active admin cannot be disabled or demoted")
 
             if role is not None and user.role != role:
                 previous_role = user.role
@@ -409,6 +419,39 @@ class AuthService:
         if len(users_by_id) != len(ordered_ids):
             raise ValueError("user not found")
         return users_by_id
+
+    @staticmethod
+    def _lock_admin_update_users(
+        session: Session,
+        user_id: int,
+        actor_user_id: int | None,
+    ) -> tuple[dict[int, AuthUser], list[AuthUser]]:
+        required_ids = {user_id}
+        if actor_user_id is not None:
+            required_ids.add(actor_user_id)
+        users = list(
+            session.scalars(
+                select(AuthUser)
+                .where(
+                    or_(
+                        AuthUser.id.in_(sorted(required_ids)),
+                        and_(
+                            AuthUser.role == "admin",
+                            AuthUser.is_active.is_(True),
+                        ),
+                    )
+                )
+                .order_by(AuthUser.id)
+                .with_for_update()
+            )
+        )
+        users_by_id = {user.id: user for user in users}
+        if not required_ids.issubset(users_by_id):
+            raise ValueError("user not found")
+        active_admins = [
+            user for user in users if user.role == "admin" and user.is_active
+        ]
+        return users_by_id, active_admins
 
     @staticmethod
     def _validate_session_ttl(ttl: timedelta) -> None:

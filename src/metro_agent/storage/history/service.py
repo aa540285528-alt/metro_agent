@@ -112,6 +112,14 @@ class ConversationHistoryService:
             session.flush()
             return self._to_summary(conversation)
 
+    def ensure_thread_available(self, thread_id: str, owner_id: str) -> None:
+        with self._session_factory() as session:
+            stored_owner = session.scalar(
+                select(Conversation.owner_id).where(Conversation.id == thread_id)
+            )
+        if stored_owner is not None and stored_owner != owner_id:
+            raise ConversationNotFound(thread_id)
+
     def list_conversations(self, owner_id: str) -> list[ConversationSummary]:
         with self._session_factory() as session:
             conversations = session.scalars(

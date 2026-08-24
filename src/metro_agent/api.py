@@ -14,7 +14,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from metro_agent.agent_service import AgentRunError, run_chat
 from metro_agent.auth.database import create_auth_session_factory
-from metro_agent.auth.dependencies import CurrentUser, get_current_user, require_admin
+from metro_agent.auth.dependencies import (
+    CurrentUser,
+    auth_checkpoint_thread_id,
+    auth_owner_subject,
+    get_current_user,
+    get_session_token,
+    require_admin,
+    require_same_origin,
+)
 from metro_agent.auth.router import (
     create_auth_router,
     get_auth_cookie_secure,
@@ -112,6 +120,11 @@ def monitoring_filter(
     )
 
 
+def reject_legacy_monitoring_user_id(request: Request) -> None:
+    if "user_id" in request.query_params:
+        raise HTTPException(status_code=422, detail="user_id is no longer supported")
+
+
 def create_app(
     graph_factory: Callable[[], Any] = build_default_graph,
     history_service_factory: Callable[[], Any] = build_default_history_service,
@@ -154,6 +167,7 @@ def create_app(
     def monitoring_summary(
         request: Request,
         filters: MonitoringFilter = Depends(monitoring_filter),
+        _legacy_user_id: None = Depends(reject_legacy_monitoring_user_id),
         _admin: CurrentUser = Depends(require_admin),
     ) -> dict[str, Any]:
         return serialize_history(_monitoring_service(request).summary(filters))
@@ -162,6 +176,7 @@ def create_app(
     def monitoring_traces(
         request: Request,
         filters: MonitoringFilter = Depends(monitoring_filter),
+        _legacy_user_id: None = Depends(reject_legacy_monitoring_user_id),
         _admin: CurrentUser = Depends(require_admin),
     ) -> dict[str, Any]:
         return serialize_history(_monitoring_service(request).list_traces(filters))
@@ -170,6 +185,7 @@ def create_app(
     def monitoring_trace_detail(
         request: Request,
         trace_id: str,
+        _legacy_user_id: None = Depends(reject_legacy_monitoring_user_id),
         _admin: CurrentUser = Depends(require_admin),
     ) -> dict[str, Any]:
         try:
@@ -182,6 +198,7 @@ def create_app(
     def monitoring_evaluations(
         request: Request,
         category: str | None = Query(default=None, max_length=32),
+        _legacy_user_id: None = Depends(reject_legacy_monitoring_user_id),
         _admin: CurrentUser = Depends(require_admin),
     ) -> list[dict[str, Any]]:
         values = _monitoring_service(request).list_evaluations(category=category)
@@ -193,7 +210,7 @@ def create_app(
         current_user: Annotated[CurrentUser, Depends(get_current_user)],
     ) -> list[dict[str, Any]]:
         conversations = request.app.state.history_service.list_conversations(
-            str(current_user.id)
+            auth_owner_subject(current_user.id)
         )
         return [serialize_history(conversation) for conversation in conversations]
 
@@ -205,7 +222,7 @@ def create_app(
     ) -> dict[str, Any]:
         try:
             conversation = request.app.state.history_service.get_conversation(
-                thread_id, str(current_user.id)
+                thread_id, auth_owner_subject(current_user.id)
             )
         except ConversationNotFound as exc:
             raise HTTPException(
@@ -213,7 +230,10 @@ def create_app(
             ) from exc
         return serialize_history(conversation)
 
-    @app.patch("/api/conversations/{thread_id}")
+    @app.patch(
+        "/api/conversations/{thread_id}",
+        dependencies=[Depends(require_same_origin)],
+    )
     def update_conversation(
         request: Request,
         thread_id: str,
@@ -223,7 +243,7 @@ def create_app(
         try:
             conversation = request.app.state.history_service.update_conversation(
                 thread_id,
-                str(current_user.id),
+                auth_owner_subject(current_user.id),
                 title=payload.title,
                 is_pinned=payload.is_pinned,
             )
@@ -237,7 +257,11 @@ def create_app(
             ) from exc
         return serialize_history(conversation)
 
-    @app.delete("/api/conversations/{thread_id}", status_code=204)
+    @app.delete(
+        "/api/conversations/{thread_id}",
+        status_code=204,
+        dependencies=[Depends(require_same_origin)],
+    )
     def delete_conversation(
         request: Request,
         thread_id: str,
@@ -245,7 +269,7 @@ def create_app(
     ) -> Response:
         try:
             request.app.state.history_service.delete_conversation(
-                thread_id, str(current_user.id)
+                thread_id, auth_owner_subject(current_user.id)
             )
         except ConversationNotFound as exc:
             raise HTTPException(
@@ -253,18 +277,58 @@ def create_app(
             ) from exc
         return Response(status_code=204)
 
-    @app.post("/api/chat/stream")
+    @app.post(
+        "/api/chat/stream",
+        response_class=StreamingResponse,
+        dependencies=[Depends(require_same_origin)],
+        responses={
+            200: {
+                "description": "Server-sent chat events",
+                "content": {"text/event-stream": {"schema": {"type": "string"}}},
+            },
+            401: {"description": "Not authenticated"},
+            403: {"description": "Cross-origin request forbidden"},
+        },
+    )
     def chat_stream(
         request: Request,
         payload: ChatRequest,
         current_user: Annotated[CurrentUser, Depends(get_current_user)],
+        _raw_session_token: Annotated[str | None, Depends(get_session_token)],
     ) -> StreamingResponse:
+        owner_subject = auth_owner_subject(current_user.id)
+        try:
+            request.app.state.history_service.ensure_thread_available(
+                payload.thread_id, owner_subject
+            )
+        except ConversationNotFound as exc:
+            raise HTTPException(
+                status_code=404, detail="Conversation not found"
+            ) from exc
+
+        def session_is_current() -> bool:
+            if _raw_session_token is None:
+                return False
+            try:
+                resolved = request.app.state.auth_service.resolve_session(
+                    _raw_session_token
+                )
+            except Exception:
+                return False
+            return resolved is not None and resolved.id == current_user.id
+
         def events() -> Generator[str, None, None]:
+            if not session_is_current():
+                yield encode_sse("error", {"message": SAFE_ERROR_MESSAGE})
+                yield encode_sse("done", {})
+                return
             try:
                 answer = chat_runner(
                     request.app.state.graph,
-                    thread_id=payload.thread_id,
-                    user_id=str(current_user.id),
+                    thread_id=auth_checkpoint_thread_id(
+                        owner_subject, payload.thread_id
+                    ),
+                    user_id=owner_subject,
                     message=payload.message,
                 )
             except AgentRunError:
@@ -277,24 +341,27 @@ def create_app(
                 )
                 yield encode_sse("error", {"message": SAFE_ERROR_MESSAGE})
             else:
-                try:
-                    request.app.state.history_service.record_turn(
-                        payload.thread_id,
-                        str(current_user.id),
-                        payload.message,
-                        answer,
-                    )
-                except Exception as exc:
-                    logger.error(
-                        "operation=record_turn error_type=%s",
-                        type(exc).__name__,
-                    )
+                if not session_is_current():
                     yield encode_sse("error", {"message": SAFE_ERROR_MESSAGE})
                 else:
-                    yield encode_sse(
-                        "final",
-                        {"thread_id": payload.thread_id, "content": answer},
-                    )
+                    try:
+                        request.app.state.history_service.record_turn(
+                            payload.thread_id,
+                            owner_subject,
+                            payload.message,
+                            answer,
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "operation=record_turn error_type=%s",
+                            type(exc).__name__,
+                        )
+                        yield encode_sse("error", {"message": SAFE_ERROR_MESSAGE})
+                    else:
+                        yield encode_sse(
+                            "final",
+                            {"thread_id": payload.thread_id, "content": answer},
+                        )
             yield encode_sse("done", {})
 
         return StreamingResponse(

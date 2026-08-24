@@ -447,3 +447,57 @@ def test_write_and_audit_are_atomic(auth_service: AuthService, monkeypatch) -> N
         auth_service.create_user("operator", "CorrectHorseBattery1", "user", None)
 
     assert auth_service.list_users() == []
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"is_active": False}, {"role": "user"}],
+)
+def test_admin_cannot_disable_or_demote_self(
+    auth_service: AuthService, changes: dict
+) -> None:
+    admin = auth_service.create_user(
+        "metro.admin", "CorrectHorseBattery1", "admin", None
+    )
+
+    with pytest.raises(ValueError, match="current admin"):
+        auth_service.update_user(admin.id, admin.id, **changes)
+
+    stored = auth_service.list_users()[0]
+    assert stored.is_active is True
+    assert stored.role == "admin"
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"is_active": False}, {"role": "user"}],
+)
+def test_last_active_admin_cannot_be_invalidated(
+    auth_service: AuthService, changes: dict
+) -> None:
+    admin = auth_service.create_user(
+        "metro.admin", "CorrectHorseBattery1", "admin", None
+    )
+
+    with pytest.raises(ValueError, match="last active admin"):
+        auth_service.update_user(admin.id, None, **changes)
+
+    stored = auth_service.list_users()[0]
+    assert stored.is_active is True
+    assert stored.role == "admin"
+
+
+def test_one_admin_can_disable_another_when_active_admin_remains(
+    auth_service: AuthService,
+) -> None:
+    first = auth_service.create_user(
+        "first.admin", "CorrectHorseBattery1", "admin", None
+    )
+    second = auth_service.create_user(
+        "second.admin", "CorrectHorseBattery2", "admin", first.id
+    )
+
+    changed = auth_service.update_user(second.id, first.id, is_active=False)
+
+    assert changed.is_active is False
+    assert auth_service.list_users()[0].is_active is True
