@@ -108,6 +108,22 @@ def test_startup_distinguishes_unauthenticated_from_service_failure() -> None:
     assert 'id="auth-retry"' in _preview()
 
 
+def test_auth_transitions_never_reuse_another_users_thread() -> None:
+    script = _inline_application_script()
+    restore = script.split("async function restoreSession()", 1)[1].split(
+        "async function submitLogin", 1
+    )[0]
+    login = script.split("async function submitLogin", 1)[1].split(
+        "async function logout", 1
+    )[0]
+
+    assert "clearAuthenticatedState();" in restore
+    assert "prepareAuthenticatedThread" in script
+    assert "reuseStoredThread: true" in restore
+    assert "reuseStoredThread: false" in login
+    assert "localStorage.removeItem(STORAGE_KEYS.threadId)" in script
+
+
 def test_api_fetch_uses_same_origin_cookies_and_centralizes_401_cleanup() -> None:
     script = _inline_application_script()
 
@@ -131,6 +147,13 @@ def test_login_handles_invalid_credentials_throttling_and_clears_password() -> N
     assert "loginSubmit.disabled" in script
     assert "JSON.stringify({ username, password })" in script
 
+    login = script.split("async function submitLogin", 1)[1].split(
+        "async function logout", 1
+    )[0]
+    assert login.index("try {") < login.index("if (!username || !password) return")
+    finally_block = login.split("} finally {", 1)[1]
+    assert "loginPassword.value = ''" in finally_block
+
 
 def test_role_controls_monitoring_visibility_and_requests() -> None:
     script = _inline_application_script()
@@ -145,6 +168,34 @@ def test_role_controls_monitoring_visibility_and_requests() -> None:
         "/api/monitoring/evaluations",
     ):
         assert endpoint in script
+
+
+def test_monitoring_state_is_invalidated_before_leaving_admin_view() -> None:
+    script = _inline_application_script()
+    cleanup = script.split("function clearMonitoringState()", 1)[1].split(
+        "function clearAuthenticatedState", 1
+    )[0]
+    enter_chat = script.split("function enterChatState()", 1)[1].split(
+        "function enterConversationState", 1
+    )[0]
+
+    assert "activeMonitoringRequestController?.abort()" in cleanup
+    assert "activeMonitoringRequestController = null" in cleanup
+    assert "monitoringRequestGeneration += 1" in cleanup
+    assert "monitoringData = { summary: null, traces: [], evaluations: [] }" in cleanup
+    for element in (
+        "monitoringKpis",
+        "monitoringTraceList",
+        "monitoringTraceDetail",
+        "monitoringOnlinePanel",
+        "monitoringEvaluationPanel",
+    ):
+        assert f"{element}?.replaceChildren()" in cleanup
+    assert "clearMonitoringState();" in enter_chat
+    assert "isCurrentMonitoringRequest" in script
+    assert (
+        script.count("isCurrentMonitoringRequest(requestGeneration, controller)") >= 4
+    )
 
 
 def test_logout_only_clears_client_state_after_server_logout_or_401() -> None:
@@ -163,6 +214,22 @@ def test_mobile_header_exposes_identity_and_logout() -> None:
     assert html.count("data-current-username") >= 2
     assert html.count("data-current-role") >= 2
     assert html.count("data-logout-trigger") >= 2
+
+
+def test_logout_error_is_an_inline_dismissible_expiring_status() -> None:
+    html = _preview()
+    _, status = _element_by_id("logout-error")
+    script = _inline_application_script()
+
+    assert "fixed" not in (status.get("class") or "").split()
+    assert status.get("aria-live") == "polite"
+    assert 'id="logout-error-message"' in html
+    assert 'id="logout-error-close"' in html
+    assert "function showAppStatus" in script
+    assert "function clearAppStatus" in script
+    assert "clearTimeout(appStatusTimer)" in script
+    assert "appStatusTimer = setTimeout" in script
+    assert "logoutErrorClose?.addEventListener('click', clearAppStatus)" in script
 
 
 def test_auth_cleanup_restores_a_blank_welcome_workspace() -> None:

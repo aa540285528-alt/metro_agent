@@ -311,7 +311,6 @@
 </div>
 </section>
 <div class="hidden h-full w-full" id="app-shell">
-<p aria-live="polite" class="fixed right-4 top-4 z-[1300] hidden rounded-md border border-error/30 bg-surface-container-lowest px-4 py-3 text-sm text-error shadow-lg" id="logout-error" role="alert"></p>
 <!-- SideNavBar -->
 <nav class="hidden md:flex flex-col h-screen w-sidebar-expanded fixed left-0 top-0 bg-surface-container-lowest border-r border-outline-variant z-40 transition-all duration-300" id="sidebar">
 <!-- Expanded Top Section -->
@@ -463,6 +462,13 @@
 </button>
 </div>
 </header>
+<div aria-live="polite" class="mx-4 mt-3 hidden shrink-0 items-center gap-3 rounded-md border border-error/30 bg-surface-container-lowest px-3 py-2 text-sm text-error md:mx-8" id="logout-error" role="status">
+<span class="material-symbols-outlined text-[18px] shrink-0">error</span>
+<span class="min-w-0 flex-1" id="logout-error-message"></span>
+<button aria-label="关闭提示" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-error transition-colors hover:bg-error/10" id="logout-error-close" title="关闭提示" type="button">
+<span class="material-symbols-outlined text-[18px]">close</span>
+</button>
+</div>
 <!-- Center Workspace -->
 <div class="flex-1 min-h-0 overflow-hidden flex flex-col items-center justify-center p-stack-md md:p-gutter max-w-[1120px] mx-auto w-full relative z-10 xl:pr-24" id="chat-workspace">
 <!-- Hero Brand Identity -->
@@ -637,6 +643,8 @@
         const appShell = document.getElementById('app-shell');
         const logoutButtons = document.querySelectorAll('[data-logout-trigger]');
         const logoutError = document.getElementById('logout-error');
+        const logoutErrorMessage = document.getElementById('logout-error-message');
+        const logoutErrorClose = document.getElementById('logout-error-close');
         let messageThreadCounter = 0;
         const STORAGE_KEYS = {
             threadId: 'metro-chat-thread-id'
@@ -679,6 +687,7 @@
         let activeMonitoringRequestController = null;
         let monitoringData = { summary: null, traces: [], evaluations: [] };
         let activeMonitoringTab = 'traces';
+        let appStatusTimer = null;
 
         class UnauthorizedError extends Error {}
 
@@ -709,15 +718,65 @@
             return currentUser?.role === 'admin';
         }
 
+        function clearAppStatus() {
+            clearTimeout(appStatusTimer);
+            appStatusTimer = null;
+            if (logoutErrorMessage) logoutErrorMessage.textContent = '';
+            logoutError?.classList.add('hidden');
+            logoutError?.classList.remove('flex');
+        }
+
+        function showAppStatus(message) {
+            clearTimeout(appStatusTimer);
+            if (logoutErrorMessage) logoutErrorMessage.textContent = message;
+            logoutError?.classList.remove('hidden');
+            logoutError?.classList.add('flex');
+            appStatusTimer = setTimeout(clearAppStatus, 5000);
+        }
+
+        function clearStoredThreadState() {
+            currentThreadId = null;
+            try {
+                localStorage.removeItem(STORAGE_KEYS.threadId);
+            } catch (error) {
+                // In-memory cleanup remains effective when browser storage is unavailable.
+            }
+        }
+
+        function prepareAuthenticatedThread({ reuseStoredThread }) {
+            if (!reuseStoredThread) clearStoredThreadState();
+            currentThreadId = getOrCreateStoredId(STORAGE_KEYS.threadId);
+        }
+
         function setMonitoringAccess() {
             const allowed = isAdmin();
             document.querySelectorAll('[data-monitoring-trigger]').forEach((button) => {
                 button.classList.toggle('hidden', !allowed);
                 button.disabled = !allowed;
             });
-            if (!allowed && !monitoringWorkspace?.classList.contains('hidden')) {
-                enterChatState();
+            if (!allowed) {
+                clearMonitoringState();
+                monitoringWorkspace?.classList.add('hidden');
+                chatWorkspace?.classList.remove('hidden');
             }
+        }
+
+        function isCurrentMonitoringRequest(requestGeneration, controller) {
+            return isAdmin()
+                && requestGeneration === monitoringRequestGeneration
+                && activeMonitoringRequestController === controller;
+        }
+
+        function clearMonitoringState() {
+            monitoringRequestGeneration += 1;
+            activeMonitoringRequestController?.abort();
+            activeMonitoringRequestController = null;
+            monitoringData = { summary: null, traces: [], evaluations: [] };
+            monitoringKpis?.replaceChildren();
+            monitoringTraceList?.replaceChildren();
+            monitoringTraceDetail?.replaceChildren();
+            monitoringOnlinePanel?.replaceChildren();
+            monitoringEvaluationPanel?.replaceChildren();
         }
 
         function clearAuthenticatedState() {
@@ -725,31 +784,19 @@
             activeRequestController?.abort();
             activeHistoryRequestController?.abort();
             activeHistoryListRequestController?.abort();
-            activeMonitoringRequestController?.abort();
             historyRequestGeneration += 1;
             historyListRequestGeneration += 1;
-            monitoringRequestGeneration += 1;
             activeRequestController = null;
             activeHistoryRequestController = null;
             activeHistoryListRequestController = null;
-            activeMonitoringRequestController = null;
             historyEntries = [];
             activeHistoryConversation = null;
-            monitoringData = { summary: null, traces: [], evaluations: [] };
-            currentThreadId = null;
-            try {
-                localStorage.removeItem(STORAGE_KEYS.threadId);
-            } catch (error) {
-                // In-memory cleanup remains effective when browser storage is unavailable.
-            }
+            clearStoredThreadState();
+            clearMonitoringState();
+            clearAppStatus();
             historyList?.replaceChildren();
             chatMessages?.replaceChildren();
             messageThreadList?.replaceChildren();
-            monitoringKpis?.replaceChildren();
-            monitoringTraceList?.replaceChildren();
-            monitoringTraceDetail?.replaceChildren();
-            monitoringOnlinePanel?.replaceChildren();
-            monitoringEvaluationPanel?.replaceChildren();
             if (chatInput) chatInput.value = '';
             messageThreadCounter = 0;
             monitoringWorkspace?.classList.add('hidden');
@@ -780,19 +827,17 @@
             return response;
         }
 
-        async function activateAuthenticatedWorkspace(user) {
+        async function activateAuthenticatedWorkspace(user, { reuseStoredThread }) {
+            clearMonitoringState();
             currentUser = user;
-            currentThreadId = getOrCreateStoredId(STORAGE_KEYS.threadId);
+            prepareAuthenticatedThread({ reuseStoredThread });
             document.querySelectorAll('[data-current-username]').forEach((element) => {
                 element.textContent = currentUser.username;
             });
             document.querySelectorAll('[data-current-role]').forEach((element) => {
                 element.textContent = currentUser.role === 'admin' ? '管理员' : '用户';
             });
-            if (logoutError) {
-                logoutError.textContent = '';
-                logoutError.classList.add('hidden');
-            }
+            clearAppStatus();
             setMonitoringAccess();
             authGate?.classList.add('hidden');
             appShell?.classList.remove('hidden');
@@ -806,14 +851,14 @@
             try {
                 const response = await apiFetch('/api/auth/me', {}, { handleUnauthorized: false });
                 if (response.status === 401) {
-                    showLoginView();
+                    clearAuthenticatedState();
                     return;
                 }
                 if (!response.ok) {
                     showAuthServiceError();
                     return;
                 }
-                await activateAuthenticatedWorkspace(await response.json());
+                await activateAuthenticatedWorkspace(await response.json(), { reuseStoredThread: true });
             } catch (error) {
                 console.error('Session restore failed:', error);
                 showAuthServiceError();
@@ -825,7 +870,6 @@
             if (!loginUsername || !loginPassword || !loginSubmit) return;
             const username = loginUsername.value.trim();
             const password = loginPassword.value;
-            if (!username || !password) return;
 
             loginSubmit.disabled = true;
             if (loginError) {
@@ -833,6 +877,7 @@
                 loginError.classList.add('hidden');
             }
             try {
+                if (!username || !password) return;
                 const response = await apiFetch('/api/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -853,18 +898,19 @@
                     showLoginView('登录失败，请稍后重试。');
                     return;
                 }
-                loginPassword.value = '';
-                await activateAuthenticatedWorkspace(await response.json());
+                await activateAuthenticatedWorkspace(await response.json(), { reuseStoredThread: false });
             } catch (error) {
                 console.error('Login failed:', error);
                 showLoginView('暂时无法连接服务，请稍后重试。');
             } finally {
+                loginPassword.value = '';
                 loginSubmit.disabled = false;
             }
         }
 
         async function logout() {
             if (!logoutButtons.length) return;
+            clearAppStatus();
             logoutButtons.forEach((button) => { button.disabled = true; });
             try {
                 const response = await apiFetch('/api/auth/logout', {
@@ -877,10 +923,7 @@
                 throw new Error(`Logout failed with status ${response.status}.`);
             } catch (error) {
                 console.error('Logout failed:', error);
-                if (logoutError) {
-                    logoutError.textContent = '退出登录失败，请稍后重试。';
-                    logoutError.classList.remove('hidden');
-                }
+                showAppStatus('退出登录失败，请稍后重试。');
             } finally {
                 logoutButtons.forEach((button) => { button.disabled = false; });
             }
@@ -1342,13 +1385,14 @@
             monitoringText(monitoringTraceDetail, '正在加载 Trace 详情…');
             try {
                 const response = await apiFetch(`/api/monitoring/traces/${encodeURIComponent(traceId)}`, { signal: controller.signal });
+                if (!isCurrentMonitoringRequest(requestGeneration, controller)) return;
                 if (!response.ok) throw new Error(`Trace detail request failed with status ${response.status}.`);
                 const trace = await response.json();
-                if (requestGeneration !== monitoringRequestGeneration || activeMonitoringRequestController !== controller) return;
+                if (!isCurrentMonitoringRequest(requestGeneration, controller)) return;
                 renderMonitoringTraceDetail(trace);
             } catch (error) {
                 if (error instanceof UnauthorizedError) return;
-                if (error.name !== 'AbortError' && requestGeneration === monitoringRequestGeneration) {
+                if (error.name !== 'AbortError' && isCurrentMonitoringRequest(requestGeneration, controller)) {
                     monitoringText(monitoringTraceDetail, '无法加载 Trace 详情，请稍后重试。', 'text-error');
                 }
             } finally {
@@ -1370,20 +1414,21 @@
                     apiFetch('/api/monitoring/traces', { signal: controller.signal }),
                     apiFetch('/api/monitoring/evaluations', { signal: controller.signal })
                 ]);
+                if (!isCurrentMonitoringRequest(requestGeneration, controller)) return;
                 if (!summaryResponse.ok || !tracesResponse.ok || !evaluationsResponse.ok) {
                     throw new Error('Monitoring request failed.');
                 }
                 const [summary, tracePage, evaluations] = await Promise.all([
                     summaryResponse.json(), tracesResponse.json(), evaluationsResponse.json()
                 ]);
-                if (requestGeneration !== monitoringRequestGeneration || activeMonitoringRequestController !== controller) return;
+                if (!isCurrentMonitoringRequest(requestGeneration, controller)) return;
                 monitoringData = { summary, traces: tracePage.items || [], evaluations: evaluations || [] };
                 renderMonitoringKpis(summary);
                 renderMonitoringTraceList(monitoringData.traces);
                 applyMonitoringTab(activeMonitoringTab);
             } catch (error) {
                 if (error instanceof UnauthorizedError) return;
-                if (error.name !== 'AbortError' && requestGeneration === monitoringRequestGeneration) {
+                if (error.name !== 'AbortError' && isCurrentMonitoringRequest(requestGeneration, controller)) {
                     monitoringText(monitoringTraceList, '无法加载监控数据，请检查服务后重试。', 'text-error');
                     monitoringText(monitoringTraceDetail, '监控数据不可用。', 'text-error');
                 }
@@ -1403,7 +1448,7 @@
         }
 
         function enterChatState() {
-            activeMonitoringRequestController?.abort();
+            clearMonitoringState();
             monitoringWorkspace?.classList.add('hidden');
             chatWorkspace?.classList.remove('hidden');
         }
@@ -1542,6 +1587,7 @@
         loginForm?.addEventListener('submit', submitLogin);
         authRetry?.addEventListener('click', restoreSession);
         logoutButtons.forEach((button) => button.addEventListener('click', logout));
+        logoutErrorClose?.addEventListener('click', clearAppStatus);
 
         document.querySelectorAll('[data-new-chat-trigger]').forEach((button) => {
             button.addEventListener('click', resetToWelcomeState);
