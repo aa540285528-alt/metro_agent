@@ -18,7 +18,7 @@ target_metadata = AuthBase.metadata
 
 
 def get_url() -> str:
-    return os.environ.get("AUTH_DATABASE_URL", config.get_main_option("sqlalchemy.url"))
+    return os.environ["AUTH_DATABASE_URL"]
 
 
 def run_migrations_offline() -> None:
