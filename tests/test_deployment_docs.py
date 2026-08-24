@@ -25,6 +25,22 @@ def test_readme_states_pilot_scope_quality_and_deployment_flow() -> None:
     assert "user_id request field is development-only" not in readme
 
 
+def test_readme_uses_one_off_bootstrap_container_and_accurate_origin_rules() -> None:
+    readme = _read("README.md")
+
+    assert (
+        "docker compose run --rm app python -m "
+        "metro_agent.auth.bootstrap_admin --username admin"
+    ) in readme
+    assert "一次性容器" in readme
+    assert "依赖" in readme
+    assert "请求存在 `Origin` 时" in readme
+    assert "规范化后同源" in readme
+    assert "缺失 `Origin`" in readme
+    assert "内部 CLI" in readme
+    assert "不信任 `X-Forwarded-For`" in readme
+
+
 def test_readme_documents_isolation_legacy_migration_and_limits() -> None:
     readme = _read("README.md")
 
@@ -37,6 +53,11 @@ def test_readme_documents_isolation_legacy_migration_and_limits() -> None:
         "无 SSO",
         "Langfuse",
         "不替换本地业务 Trace",
+        "chroma_db",
+        "memory_chroma_db",
+        "长期记忆 `user_id = auth:<id>`",
+        "长期记忆备份",
+        "长期记忆回滚",
     ):
         assert expected in readme
 
@@ -52,6 +73,9 @@ def test_architecture_and_acceptance_documents_cover_trust_boundaries() -> None:
         "Redis",
         "auth:<id>",
         "Langfuse",
+        "chroma_db",
+        "memory_chroma_db",
+        "长期记忆",
     ):
         assert expected in architecture
 
@@ -67,6 +91,11 @@ def test_architecture_and_acceptance_documents_cover_trust_boundaries() -> None:
         "legacy",
         "模型质量未过门槛",
         "签字",
+        "memory_chroma_db",
+        "元数据 `user_id`",
+        "审批映射",
+        "影响数量",
+        "长期记忆回滚",
     ):
         assert expected in acceptance
 

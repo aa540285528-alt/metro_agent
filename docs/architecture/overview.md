@@ -15,11 +15,12 @@ FastAPI
   |-- MySQL：验证账号、会话摘要、角色与审计
   |-- PostgreSQL：会话历史、Trace、工具调用、评测元数据
   |-- Redis：短期 checkpoint，键空间包含 auth:<id>
-  |-- Chroma：已发布知识索引
+  |-- Chroma chroma_db：已发布知识索引
+  |-- Chroma memory_chroma_db：按 auth:<id> 隔离的用户长期记忆
   `-- 工具/模型提供商：受网络和凭据边界约束
 ```
 
-浏览器是不可信输入端。FastAPI 从 `metro_session` Cookie 解析当前用户，忽略并拒绝旧式 `user_id` 输入；普通用户只能访问自己的会话，管理员才能访问全局监控和账号管理。所有写接口还检查精确同源 `Origin`。
+浏览器是不可信输入端。FastAPI 从 `metro_session` Cookie 解析当前用户，忽略并拒绝旧式 `user_id` 输入；普通用户只能访问自己的会话，管理员才能访问全局监控和账号管理。浏览器请求存在 `Origin` 时必须与请求基准地址规范化后同源；缺失 `Origin` 仅为受控内部 CLI 保留。应用不直接信任 `X-Forwarded-For`，转发头清理和受信代理范围属于反向代理边界。
 
 ## 身份与数据归属
 
@@ -27,7 +28,8 @@ FastAPI
 - PostgreSQL `metro_agent` 保存业务历史和本地可追责 Trace。会话 `owner_id` 与 Trace `user_id` 使用稳定主题 `auth:<id>`。
 - LangGraph checkpoint 使用 `auth:<id>:<thread_id>` 命名空间，避免不同用户提交相同 thread ID 时共享短期上下文。
 - Redis 不是权限判断依据；即使 checkpoint 存在，API 仍会在 Agent 开始前和写历史前复核 MySQL 会话。
-- 旧自由字符串或裸数字 owner 不会自动与 MySQL ID 绑定，必须按 README 的审批映射流程迁移。
+- `chroma_db` 保存共享的已发布知识索引，不承载用户身份映射；`memory_chroma_db` 保存用户长期记忆，metadata `user_id` 必须是 `auth:<id>`，检索以该字段隔离。
+- 旧自由字符串或裸数字 owner 不会自动与 MySQL ID 绑定，必须按 README 的同一份审批映射同步迁移 PostgreSQL 和 `memory_chroma_db`。迁移前同时备份两类 Chroma；记录影响数量和验证证据，长期记忆回滚使用快照或原 metadata，绝不改写 `chroma_db` 身份字段。
 
 ## 运行组件
 
@@ -35,7 +37,7 @@ FastAPI
 - `metro_agent.graph`：LangGraph 工作流与 Agent 路由。
 - `metro_agent.tools`：RAG 与外部服务适配器；工具权限治理仍是独立交付项。
 - `metro_agent.observability`：本地 Trace、工具调用、时延、Token 和评测引用。
-- `metro_agent.storage`、`metro_agent.memory`：PostgreSQL 历史与 Redis checkpoint 适配器。
+- `metro_agent.storage`、`metro_agent.memory`：PostgreSQL 历史、Redis checkpoint、`chroma_db` 知识索引与 `memory_chroma_db` 长期记忆适配器。
 - `db-migrate`、`auth-migrate`：分别等待 PostgreSQL、MySQL healthy 后执行 Alembic；应用只在两个迁移成功后启动。
 
 Compose 网络不发布 MySQL、PostgreSQL 或 Redis 端口。应用仅发布到宿主机回环地址；WireMock 仅在 `mock` profile 下启动，认证链路不依赖公网资源。

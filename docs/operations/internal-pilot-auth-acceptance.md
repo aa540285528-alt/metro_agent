@@ -37,11 +37,12 @@
 
 ## 数据与恢复
 
-- [ ] MySQL 身份库、PostgreSQL 业务库和知识索引均完成加密备份。
+- [ ] MySQL 身份库、PostgreSQL 业务库、知识索引 `chroma_db` 和用户长期记忆 `memory_chroma_db` 均完成加密备份并记录校验值。
 - [ ] 在隔离环境完成备份恢复演练，记录 RPO、RTO、校验行数和负责人。
 - [ ] 执行身份库 `upgrade -> downgrade -> upgrade` 测试，确认表、外键和指定索引。
-- [ ] legacy owner 已盘点并审批；裸数字 owner 未自动继承，逐项执行 `legacy_owner -> auth:<id>` 映射。
-- [ ] legacy 迁移同时核对 `conversations.owner_id`、`agent_traces.user_id`、关联 artifact 和 Redis 短期 checkpoint，保存 SQL、影响行数和回滚证据。
+- [ ] legacy owner 已盘点并形成审批映射；裸数字 owner 未自动继承，逐项执行 `legacy_owner -> auth:<id>`，PostgreSQL 与 Chroma 使用同一映射。
+- [ ] legacy 迁移同时核对 `conversations.owner_id`、`agent_traces.user_id`、`memory_chroma_db` 元数据 `user_id`、关联 artifact 和 Redis 短期 checkpoint；记录每个来源的备份、影响数量、验证结果和回滚证据。
+- [ ] `memory_chroma_db` 迁移后旧 `user_id` 计数为零、目标 `auth:<id>` 增量与影响数量一致，抽查检索和跨用户隔离；长期记忆回滚已用快照或原 metadata 演练，且未改写 `chroma_db`。
 - [ ] 镜像回滚和数据库前滚修复步骤已演练；任何有损 downgrade 都有单独审批。
 
 ## 质量与已知限制
