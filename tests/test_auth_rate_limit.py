@@ -110,7 +110,7 @@ def test_invalid_username_is_stored_only_as_a_bounded_digest() -> None:
     assert all(len(key) < 160 for key in keys)
 
 
-def test_expired_events_are_cleaned_only_for_current_request_scopes() -> None:
+def test_expired_active_keys_are_reclaimed_by_expiry_index() -> None:
     from metro_agent.auth.rate_limit import LoginRateLimiter
 
     clock = FakeClock()
@@ -123,7 +123,7 @@ def test_expired_events_are_cleaned_only_for_current_request_scopes() -> None:
     limiter.record_failure("current", "10.0.0.1")
 
     assert limiter.failure_count("current", "10.0.0.1") == 1
-    assert limiter.tracked_key_count == 43
+    assert limiter.tracked_key_count == 3
 
 
 def test_begin_attempt_atomically_blocks_the_sixth_concurrent_attempt() -> None:
@@ -215,7 +215,66 @@ def test_success_clears_username_and_pair_budgets_but_keeps_other_ip_failures() 
         limiter.finalize_failure(lease)
 
 
-def test_lru_capacity_and_event_counts_remain_bounded_under_username_flood() -> None:
+def test_success_preserves_older_pending_attempts_that_fail_later() -> None:
+    from metro_agent.auth.rate_limit import LoginAttemptBlocked, LoginAttemptLease
+    from metro_agent.auth.rate_limit import LoginRateLimiter
+
+    limiter = LoginRateLimiter()
+    wrong_leases = []
+    for _ in range(4):
+        lease = limiter.begin_attempt("operator", "10.0.0.1")
+        assert isinstance(lease, LoginAttemptLease)
+        wrong_leases.append(lease)
+    success = limiter.begin_attempt("operator", "10.0.0.1")
+    assert isinstance(success, LoginAttemptLease)
+
+    limiter.finalize_success(success)
+    for lease in wrong_leases:
+        limiter.finalize_failure(lease)
+
+    assert limiter.failure_count("operator", "10.0.0.1") == 4
+    fifth = limiter.begin_attempt("operator", "10.0.0.1")
+    assert isinstance(fifth, LoginAttemptLease)
+    limiter.finalize_failure(fifth)
+    assert isinstance(
+        limiter.begin_attempt("operator", "10.0.0.1"), LoginAttemptBlocked
+    )
+
+
+def test_finalizing_an_old_token_does_not_change_rebuilt_bucket_event() -> None:
+    from metro_agent.auth.rate_limit import LoginAttemptLease, LoginRateLimiter
+
+    limiter = LoginRateLimiter()
+    old = limiter.begin_attempt("operator", "10.0.0.1")
+    assert isinstance(old, LoginAttemptLease)
+    limiter.cancel(old)
+    current = limiter.begin_attempt("operator", "10.0.0.1")
+    assert isinstance(current, LoginAttemptLease)
+
+    limiter.finalize_failure(old)
+    limiter.finalize_success(old)
+
+    pair_events = limiter._buckets[("pair", current.pair_bucket)]
+    assert len(pair_events) == 1
+    assert pair_events[0].token == current.token
+    assert pair_events[0].state == "pending"
+
+
+def test_failed_lease_cannot_be_reclassified_by_late_success_or_cancel() -> None:
+    from metro_agent.auth.rate_limit import LoginAttemptLease, LoginRateLimiter
+
+    limiter = LoginRateLimiter()
+    failed = limiter.begin_attempt("operator", "10.0.0.1")
+    assert isinstance(failed, LoginAttemptLease)
+    limiter.finalize_failure(failed)
+
+    limiter.finalize_success(failed)
+    limiter.cancel(failed)
+
+    assert limiter.failure_count("operator", "10.0.0.1") == 1
+
+
+def test_active_capacity_and_event_counts_remain_bounded_under_username_flood() -> None:
     from metro_agent.auth.rate_limit import LoginAttemptLease, LoginRateLimiter
 
     limiter = LoginRateLimiter(max_tracked_keys=128)
@@ -226,6 +285,65 @@ def test_lru_capacity_and_event_counts_remain_bounded_under_username_flood() -> 
 
     assert limiter.tracked_key_count <= 128
     assert limiter.max_events_in_any_key <= 25
+    assert len(limiter._expirations._heap) == limiter.tracked_key_count
+
+
+def test_active_victim_remains_blocked_during_new_key_churn() -> None:
+    from metro_agent.auth.rate_limit import LoginAttemptBlocked, LoginAttemptLease
+    from metro_agent.auth.rate_limit import LoginRateLimiter
+
+    limiter = LoginRateLimiter(max_tracked_keys=9)
+    for _ in range(5):
+        lease = limiter.begin_attempt("victim", "10.0.0.1")
+        assert isinstance(lease, LoginAttemptLease)
+        limiter.finalize_failure(lease)
+
+    for index in range(1000):
+        lease = limiter.begin_attempt(f"churn{index}", f"10.1.0.{index}")
+        if isinstance(lease, LoginAttemptLease):
+            limiter.finalize_failure(lease)
+
+    assert isinstance(
+        limiter.begin_attempt("victim", "10.0.0.1"), LoginAttemptBlocked
+    )
+    assert limiter.tracked_key_count <= 9
+
+
+def test_full_active_capacity_rejects_new_key_without_eviction() -> None:
+    from metro_agent.auth.rate_limit import LoginAttemptBlocked, LoginAttemptLease
+    from metro_agent.auth.rate_limit import LoginRateLimiter
+
+    limiter = LoginRateLimiter(max_tracked_keys=3)
+    victim = limiter.begin_attempt("victim", "10.0.0.1")
+    assert isinstance(victim, LoginAttemptLease)
+    limiter.finalize_failure(victim)
+
+    blocked = limiter.begin_attempt("new.user", "10.0.0.2")
+
+    assert isinstance(blocked, LoginAttemptBlocked)
+    assert blocked.retry_after == 60
+    assert limiter.failure_count("victim", "10.0.0.1") == 1
+    assert limiter.tracked_key_count == 3
+
+
+def test_expired_capacity_is_reclaimed_for_new_key() -> None:
+    from metro_agent.auth.rate_limit import LoginAttemptBlocked, LoginAttemptLease
+    from metro_agent.auth.rate_limit import LoginRateLimiter
+
+    clock = FakeClock()
+    limiter = LoginRateLimiter(max_tracked_keys=3, clock=clock)
+    victim = limiter.begin_attempt("victim", "10.0.0.1")
+    assert isinstance(victim, LoginAttemptLease)
+    limiter.finalize_failure(victim)
+    assert isinstance(
+        limiter.begin_attempt("new.user", "10.0.0.2"), LoginAttemptBlocked
+    )
+
+    clock.advance(60)
+    recovered = limiter.begin_attempt("new.user", "10.0.0.2")
+
+    assert isinstance(recovered, LoginAttemptLease)
+    assert limiter.tracked_key_count == 3
 
 
 class NoFullScanOrderedDict(OrderedDict):
