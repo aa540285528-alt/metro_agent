@@ -27,13 +27,13 @@ class AuthUser(AuthBase):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),
         default=utc_now_naive,
-        server_default=text("UTC_TIMESTAMP()"),
+        server_default=text("(UTC_TIMESTAMP())"),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),
         default=utc_now_naive,
-        server_default=text("UTC_TIMESTAMP()"),
+        server_default=text("(UTC_TIMESTAMP())"),
         onupdate=utc_now_naive,
         nullable=False,
     )
@@ -55,7 +55,7 @@ class AuthSession(AuthBase):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),
         default=utc_now_naive,
-        server_default=text("UTC_TIMESTAMP()"),
+        server_default=text("(UTC_TIMESTAMP())"),
         nullable=False,
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
@@ -78,6 +78,6 @@ class AuthAuditEvent(AuthBase):
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),
         default=utc_now_naive,
-        server_default=text("UTC_TIMESTAMP()"),
+        server_default=text("(UTC_TIMESTAMP())"),
         nullable=False,
     )

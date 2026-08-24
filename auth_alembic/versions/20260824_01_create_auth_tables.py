@@ -28,13 +28,13 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=False),
-            server_default=sa.text("UTC_TIMESTAMP()"),
+            server_default=sa.text("(UTC_TIMESTAMP())"),
             nullable=False,
         ),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=False),
-            server_default=sa.text("UTC_TIMESTAMP()"),
+            server_default=sa.text("(UTC_TIMESTAMP())"),
             nullable=False,
         ),
         sa.Column("last_login_at", sa.DateTime(timezone=False), nullable=True),
@@ -49,7 +49,7 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=False),
-            server_default=sa.text("UTC_TIMESTAMP()"),
+            server_default=sa.text("(UTC_TIMESTAMP())"),
             nullable=False,
         ),
         sa.Column("expires_at", sa.DateTime(timezone=False), nullable=False),
@@ -70,7 +70,7 @@ def upgrade() -> None:
         sa.Column(
             "occurred_at",
             sa.DateTime(timezone=False),
-            server_default=sa.text("UTC_TIMESTAMP()"),
+            server_default=sa.text("(UTC_TIMESTAMP())"),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(["actor_user_id"], ["users.id"], ondelete="SET NULL"),

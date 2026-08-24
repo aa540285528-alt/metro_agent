@@ -41,4 +41,4 @@ def test_auth_datetimes_are_naive_utc() -> None:
     assert all(column.type.timezone is False for column in datetime_columns)
     assert {
         str(column.server_default.arg) for column in default_columns
-    } == {"UTC_TIMESTAMP()"}
+    } == {"(UTC_TIMESTAMP())"}

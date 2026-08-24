@@ -45,7 +45,8 @@ def test_auth_migration_uses_validated_url_and_utc_schema() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("DEFAULT UTC_TIMESTAMP()") == 4
+    assert result.stdout.count("DEFAULT (UTC_TIMESTAMP())") == 4
+    assert "DEFAULT UTC_TIMESTAMP()" not in result.stdout
     assert "DEFAULT now()" not in result.stdout
     for index_name in {
         "ix_auth_sessions_user_id",
