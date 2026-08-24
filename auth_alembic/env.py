@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from metro_agent.auth.database import get_auth_database_url
 from metro_agent.auth.models import AuthBase
 
 
@@ -18,7 +18,7 @@ target_metadata = AuthBase.metadata
 
 
 def get_url() -> str:
-    return os.environ["AUTH_DATABASE_URL"]
+    return get_auth_database_url()
 
 
 def run_migrations_offline() -> None:

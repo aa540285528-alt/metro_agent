@@ -26,12 +26,18 @@ def upgrade() -> None:
         sa.Column("role", sa.String(length=32), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+            "created_at",
+            sa.DateTime(timezone=False),
+            server_default=sa.text("UTC_TIMESTAMP()"),
+            nullable=False,
         ),
         sa.Column(
-            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+            "updated_at",
+            sa.DateTime(timezone=False),
+            server_default=sa.text("UTC_TIMESTAMP()"),
+            nullable=False,
         ),
-        sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("last_login_at", sa.DateTime(timezone=False), nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("username"),
     )
@@ -41,10 +47,13 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("token_hash", sa.String(length=64), nullable=False),
         sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+            "created_at",
+            sa.DateTime(timezone=False),
+            server_default=sa.text("UTC_TIMESTAMP()"),
+            nullable=False,
         ),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("expires_at", sa.DateTime(timezone=False), nullable=False),
+        sa.Column("revoked_at", sa.DateTime(timezone=False), nullable=True),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("token_hash"),
@@ -59,7 +68,10 @@ def upgrade() -> None:
         sa.Column("event_type", sa.String(length=64), nullable=False),
         sa.Column("metadata_json", sa.JSON(), nullable=False),
         sa.Column(
-            "occurred_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+            "occurred_at",
+            sa.DateTime(timezone=False),
+            server_default=sa.text("UTC_TIMESTAMP()"),
+            nullable=False,
         ),
         sa.ForeignKeyConstraint(["actor_user_id"], ["users.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["subject_user_id"], ["users.id"], ondelete="SET NULL"),
