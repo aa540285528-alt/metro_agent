@@ -1,5 +1,7 @@
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError
 from datetime import timedelta
+from threading import Barrier, Lock
 from types import SimpleNamespace
 
 import pytest
@@ -730,6 +732,56 @@ def test_login_rate_limit_blocks_sixth_request_before_service_call(
     assert responses[-1].json() == {"detail": "Too many login attempts"}
 
 
+def test_concurrent_sixth_login_is_blocked_before_database_call(
+    auth_api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    check_barrier = Barrier(6)
+    calls_lock = Lock()
+    database_calls = 0
+    original_is_blocked = auth_api.app.state.login_rate_limiter.is_blocked
+
+    def synchronized_non_atomic_check(*args):
+        result = original_is_blocked(*args)
+        check_barrier.wait(timeout=5)
+        return result
+
+    def slow_failed_login(*_args, **_kwargs):
+        nonlocal database_calls
+        with calls_lock:
+            database_calls += 1
+        return None
+
+    monkeypatch.setattr(auth_api.service, "login", slow_failed_login)
+    monkeypatch.setattr(
+        auth_api.app.state.login_rate_limiter,
+        "is_blocked",
+        synchronized_non_atomic_check,
+    )
+
+    def request(index: int):
+        client = TestClient(
+            auth_api.app,
+            client=("10.0.0.1", 50000 + index),
+        )
+        try:
+            return login(client, "operator", "WrongPassword9")
+        finally:
+            client.close()
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        responses = list(executor.map(request, range(6)))
+
+    assert sorted(response.status_code for response in responses) == [
+        401,
+        401,
+        401,
+        401,
+        401,
+        429,
+    ]
+    assert database_calls == 5
+
+
 def test_successful_login_clears_failure_bucket(auth_api) -> None:
     for _ in range(4):
         assert login(auth_api.client, "operator", "WrongPassword9").status_code == 401
@@ -772,8 +824,9 @@ def test_login_rate_limit_does_not_trust_x_forwarded_for(auth_api) -> None:
 
 
 def test_login_rate_limit_uses_request_client_host_not_forwarded_header(
-    auth_api,
+    auth_api, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(auth_api.service, "login", lambda *_args, **_kwargs: None)
     forwarded = {"X-Forwarded-For": "203.0.113.10"}
     first = TestClient(auth_api.app, client=("10.0.0.1", 50000))
     second = TestClient(auth_api.app, client=("10.0.0.2", 50000))
@@ -782,27 +835,26 @@ def test_login_rate_limit_uses_request_client_host_not_forwarded_header(
             first.post(
                 "/api/auth/login",
                 headers=forwarded,
-                json={"username": "operator", "password": "WrongPassword9"},
+                json={"username": f"user{index:03d}", "password": "WrongPassword9"},
             )
-            for _ in range(6)
+            for index in range(25)
         ]
+        first_blocked = first.post(
+            "/api/auth/login",
+            headers=forwarded,
+            json={"username": "blocked.user", "password": "WrongPassword9"},
+        )
         second_response = second.post(
             "/api/auth/login",
             headers=forwarded,
-            json={"username": "operator", "password": "WrongPassword9"},
+            json={"username": "allowed.user", "password": "WrongPassword9"},
         )
     finally:
         first.close()
         second.close()
 
-    assert [response.status_code for response in first_responses] == [
-        401,
-        401,
-        401,
-        401,
-        401,
-        429,
-    ]
+    assert all(response.status_code == 401 for response in first_responses)
+    assert first_blocked.status_code == 429
     assert second_response.status_code == 401
 
 

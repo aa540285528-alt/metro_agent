@@ -15,7 +15,11 @@ from metro_agent.auth.dependencies import (
     require_admin,
     require_same_origin,
 )
-from metro_agent.auth.rate_limit import LoginRateLimiter
+from metro_agent.auth.rate_limit import (
+    LoginAttemptBlocked,
+    LoginAttemptLease,
+    LoginRateLimiter,
+)
 
 
 class LoginRequest(BaseModel):
@@ -90,25 +94,30 @@ def create_auth_router(
     )
     def login(payload: LoginRequest, request: Request, response: Response):
         client_ip = request.client.host if request.client is not None else "<unknown>"
-        if login_rate_limiter.is_blocked(payload.username, client_ip):
-            retry_after = login_rate_limiter.retry_after(payload.username, client_ip)
+        attempt = login_rate_limiter.begin_attempt(payload.username, client_ip)
+        if isinstance(attempt, LoginAttemptBlocked):
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Too many login attempts",
-                headers={"Retry-After": str(retry_after)},
+                headers={"Retry-After": str(attempt.retry_after)},
             )
-        result = request.app.state.auth_service.login(
-            payload.username,
-            payload.password,
-            timedelta(seconds=session_ttl_seconds),
-        )
+        assert isinstance(attempt, LoginAttemptLease)
+        try:
+            result = request.app.state.auth_service.login(
+                payload.username,
+                payload.password,
+                timedelta(seconds=session_ttl_seconds),
+            )
+        except Exception:
+            login_rate_limiter.cancel(attempt)
+            raise
         if result is None:
-            login_rate_limiter.record_failure(payload.username, client_ip)
+            login_rate_limiter.finalize_failure(attempt)
             raise HTTPException(
                 status_code=401,
                 detail="Invalid username or password",
             )
-        login_rate_limiter.clear(payload.username, client_ip)
+        login_rate_limiter.finalize_success(attempt)
         user, raw_token = result
         response.set_cookie(
             key=SESSION_COOKIE_NAME,

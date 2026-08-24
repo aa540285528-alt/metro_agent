@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from threading import Lock, current_thread
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -291,47 +290,85 @@ def test_main_configuration_failure_is_nonzero_and_hides_exception_secret(
     assert secret not in captured.err
 
 
-class SimulatedMySQLState:
-    def __init__(self) -> None:
-        self.advisory_lock = Lock()
-        self.active_admin_id: int | None = None
-        self.next_user_id = 1
-        self.operations: list[tuple[str, str]] = []
+class SimulatedMySQLConnection:
+    def __init__(self, operations: list[str], release_result: int = 1) -> None:
+        self.operations = operations
+        self.release_result = release_result
+
+    def __enter__(self):
+        self.operations.append("connection_enter")
+        return self
+
+    def __exit__(self, *_args) -> None:
+        self.operations.append("connection_exit")
+
+    def scalar(self, statement):
+        rendered = str(statement).lower()
+        if "get_lock" in rendered:
+            self.operations.append("acquire")
+            return 1
+        if "release_lock" in rendered:
+            self.operations.append("release")
+            return self.release_result
+        raise AssertionError(f"unexpected connection statement: {rendered}")
 
 
-class SimulatedMySQLSession:
-    def __init__(self, state: SimulatedMySQLState) -> None:
-        self.state = state
-        self.bind = SimpleNamespace(dialect=SimpleNamespace(name="mysql"))
+class SimulatedMySQLEngine:
+    def __init__(self, operations: list[str], release_result: int = 1) -> None:
+        self.dialect = SimpleNamespace(name="mysql")
+        self.connection = SimulatedMySQLConnection(operations, release_result)
+
+    def connect(self) -> SimulatedMySQLConnection:
+        return self.connection
+
+
+class BindProbeSession:
+    def __init__(self, engine: SimulatedMySQLEngine, operations: list[str]) -> None:
+        self.bind = engine
+        self.operations = operations
+
+    def get_bind(self):
+        self.operations.append("get_bind")
+        return self.bind
+
+    def close(self) -> None:
+        self.operations.append("probe_close")
+
+
+class ConnectionBoundSession:
+    def __init__(
+        self,
+        *,
+        bind,
+        expire_on_commit: bool,
+        join_transaction_mode: str,
+        operations: list[str],
+    ) -> None:
+        assert isinstance(bind, SimulatedMySQLConnection)
+        assert expire_on_commit is False
+        assert join_transaction_mode == "control_fully"
+        self.connection = bind
+        self.operations = operations
         self.pending_user = None
 
     @contextmanager
     def begin(self):
+        self.operations.append("transaction_begin")
         try:
             yield self
         except Exception:
-            self.pending_user = None
+            self.operations.append("rollback")
             raise
         else:
-            if self.pending_user is not None:
-                self.state.active_admin_id = self.pending_user.id
+            self.operations.append("commit")
 
     def scalar(self, statement):
         rendered = str(statement).lower()
-        worker = current_thread().name
-        if "get_lock" in rendered:
-            self.state.advisory_lock.acquire()
-            self.state.operations.append(("get_lock", worker))
-            return 1
-        if "release_lock" in rendered:
-            self.state.operations.append(("release_lock", worker))
-            self.state.advisory_lock.release()
-            return 1
         if "users.role" in rendered and "users.is_active" in rendered:
-            return self.state.active_admin_id
+            return None
         if "users.username" in rendered:
             return None
-        raise AssertionError(f"unexpected scalar statement: {rendered}")
+        raise AssertionError(f"unexpected session statement: {rendered}")
 
     def add(self, value) -> None:
         if value.__class__.__name__ == "AuthUser":
@@ -339,52 +376,58 @@ class SimulatedMySQLSession:
 
     def flush(self) -> None:
         assert self.pending_user is not None
-        self.pending_user.id = self.state.next_user_id
-        self.state.next_user_id += 1
+        self.pending_user.id = 1
 
     def close(self) -> None:
-        pass
+        self.operations.append("session_close")
 
 
-class NoOpProcessLock:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args) -> None:
-        return None
-
-
-def test_mysql_advisory_lock_serializes_different_first_admin_usernames(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def mysql_lock_service(
+    monkeypatch: pytest.MonkeyPatch, *, release_result: int = 1
+) -> tuple[AuthService, SimulatedMySQLConnection, list[str]]:
     import metro_agent.auth.service as service_module
 
-    state = SimulatedMySQLState()
-    monkeypatch.setattr(service_module, "_FIRST_ADMIN_LOCK", NoOpProcessLock())
-    services = [
-        AuthService(lambda: SimulatedMySQLSession(state), "mysql-lock-test-pepper")
-        for _ in range(2)
-    ]
+    operations: list[str] = []
+    engine = SimulatedMySQLEngine(operations, release_result)
 
-    def create(candidate: tuple[AuthService, str]) -> str:
-        service, username = candidate
-        try:
-            service.create_user(username, "CorrectHorseBattery1", "admin", None)
-        except ValueError as exc:
-            return str(exc)
-        return "created"
+    def session_factory():
+        return BindProbeSession(engine, operations)
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        results = list(
-            executor.map(create, zip(services, ["first.admin", "second.admin"]))
-        )
+    def connection_session(**kwargs):
+        return ConnectionBoundSession(operations=operations, **kwargs)
 
-    assert results.count("created") == 1
-    assert results.count("active admin already exists") == 1
-    lock_operations = [operation for operation, _worker in state.operations]
-    assert lock_operations == [
-        "get_lock",
-        "release_lock",
-        "get_lock",
-        "release_lock",
-    ]
+    monkeypatch.setattr(service_module, "Session", connection_session)
+    return (
+        AuthService(session_factory, "mysql-lock-test-pepper"),
+        engine.connection,
+        operations,
+    )
+
+
+def test_mysql_advisory_lock_uses_one_connection_through_commit_and_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _connection, operations = mysql_lock_service(monkeypatch)
+
+    created = service.create_user(
+        "first.admin", "CorrectHorseBattery1", "admin", None
+    )
+
+    assert created.username == "first.admin"
+    assert operations.count("connection_enter") == 1
+    assert operations.index("acquire") < operations.index("commit")
+    assert operations.index("commit") < operations.index("release")
+    assert operations.index("release") < operations.index("connection_exit")
+
+
+def test_mysql_advisory_lock_release_failure_is_observable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _connection, operations = mysql_lock_service(
+        monkeypatch, release_result=0
+    )
+
+    with pytest.raises(RuntimeError, match="release first admin lock"):
+        service.create_user("first.admin", "CorrectHorseBattery1", "admin", None)
+
+    assert operations.index("commit") < operations.index("release")

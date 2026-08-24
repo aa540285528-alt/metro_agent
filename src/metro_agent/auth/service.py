@@ -72,59 +72,111 @@ class AuthService:
         *,
         first_admin: bool = False,
     ) -> AuthUser:
-        session = self._session_factory()
-        database_lock_acquired = False
+        if first_admin:
+            return self._create_first_admin(normalized, encoded, role, actor_user_id)
+        with self._session_factory.begin() as session:
+            return self._create_user_in_session(
+                session, normalized, encoded, role, actor_user_id
+            )
+
+    def _create_first_admin(
+        self,
+        normalized: str,
+        encoded: str,
+        role: str,
+        actor_user_id: int | None,
+    ) -> AuthUser:
+        probe_session = self._session_factory()
         try:
-            with session.begin():
-                if first_admin and session.bind is not None:
-                    if session.bind.dialect.name == "mysql":
-                        database_lock_acquired = (
-                            session.scalar(
-                                select(
-                                    func.get_lock(_FIRST_ADMIN_DATABASE_LOCK, 10)
-                                )
-                            )
-                            == 1
-                        )
-                        if not database_lock_acquired:
-                            raise RuntimeError("could not acquire first admin lock")
-                    active_admin = session.scalar(
-                        select(AuthUser.id)
-                        .where(
-                            AuthUser.role == "admin",
-                            AuthUser.is_active.is_(True),
-                        )
-                        .with_for_update()
-                    )
-                    if active_admin is not None:
-                        raise ValueError("active admin already exists")
-                if session.scalar(
-                    select(AuthUser.id).where(AuthUser.username == normalized)
-                ):
-                    raise ValueError("username already exists")
-                user = AuthUser(
-                    username=normalized,
-                    password_hash=encoded,
-                    role=role,
-                    is_active=True,
-                )
-                session.add(user)
-                try:
-                    session.flush()
-                except IntegrityError:
-                    raise ValueError("username already exists") from None
-                self._add_audit(
-                    session,
-                    "user_created",
-                    actor_user_id,
-                    user.id,
-                    {"username": normalized, "role": role},
-                )
-                return user
+            bind = probe_session.get_bind()
         finally:
-            if database_lock_acquired:
-                session.scalar(select(func.release_lock(_FIRST_ADMIN_DATABASE_LOCK)))
-            session.close()
+            probe_session.close()
+
+        if bind.dialect.name != "mysql":
+            with self._session_factory.begin() as session:
+                return self._create_user_in_session(
+                    session,
+                    normalized,
+                    encoded,
+                    role,
+                    actor_user_id,
+                    require_no_active_admin=True,
+                )
+
+        with bind.connect() as connection:
+            acquired = connection.scalar(
+                select(func.get_lock(_FIRST_ADMIN_DATABASE_LOCK, 10))
+            )
+            if acquired != 1:
+                raise RuntimeError("could not acquire first admin lock")
+            try:
+                session = Session(
+                    bind=connection,
+                    expire_on_commit=False,
+                    join_transaction_mode="control_fully",
+                )
+                try:
+                    with session.begin():
+                        user = self._create_user_in_session(
+                            session,
+                            normalized,
+                            encoded,
+                            role,
+                            actor_user_id,
+                            require_no_active_admin=True,
+                        )
+                finally:
+                    session.close()
+            finally:
+                released = connection.scalar(
+                    select(func.release_lock(_FIRST_ADMIN_DATABASE_LOCK))
+                )
+                if released != 1:
+                    raise RuntimeError("could not release first admin lock")
+            return user
+
+    def _create_user_in_session(
+        self,
+        session: Session,
+        normalized: str,
+        encoded: str,
+        role: str,
+        actor_user_id: int | None,
+        *,
+        require_no_active_admin: bool = False,
+    ) -> AuthUser:
+        if require_no_active_admin:
+            active_admin = session.scalar(
+                select(AuthUser.id)
+                .where(
+                    AuthUser.role == "admin",
+                    AuthUser.is_active.is_(True),
+                )
+                .with_for_update()
+            )
+            if active_admin is not None:
+                raise ValueError("active admin already exists")
+        if session.scalar(select(AuthUser.id).where(AuthUser.username == normalized)):
+            raise ValueError("username already exists")
+        user = AuthUser(
+            username=normalized,
+            password_hash=encoded,
+            role=role,
+            is_active=True,
+        )
+        session.add(user)
+        try:
+            session.flush()
+        except IntegrityError:
+            raise ValueError("username already exists") from None
+        self._add_audit(
+            session,
+            "user_created",
+            actor_user_id,
+            user.id,
+            {"username": normalized, "role": role},
+        )
+        return user
 
     def authenticate(self, username: str, password: str) -> AuthUser | None:
         """Verify credentials only; interactive login callers must use login()."""
