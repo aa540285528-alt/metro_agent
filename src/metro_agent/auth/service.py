@@ -79,6 +79,7 @@ class AuthService:
             return user
 
     def authenticate(self, username: str, password: str) -> AuthUser | None:
+        """Verify credentials only; interactive login callers must use login()."""
         try:
             normalized = normalize_username(username)
         except ValueError:
@@ -115,17 +116,83 @@ class AuthService:
             )
             return user
 
+    def login(
+        self,
+        username: str,
+        password: str,
+        ttl: timedelta,
+    ) -> tuple[AuthUser, str] | None:
+        """Verify credentials and issue a session in one transaction."""
+        self._validate_session_ttl(ttl)
+        try:
+            normalized = normalize_username(username)
+        except ValueError:
+            verify_password(password, _DUMMY_PASSWORD_HASH)
+            self._record_failed_authentication(
+                self._malformed_username_metadata(username)
+            )
+            return None
+
+        with self._session_factory.begin() as session:
+            user = session.scalar(
+                select(AuthUser)
+                .where(AuthUser.username == normalized)
+                .with_for_update()
+            )
+            encoded = user.password_hash if user is not None else _DUMMY_PASSWORD_HASH
+            password_matches = verify_password(password, encoded)
+            if user is None or not password_matches or not user.is_active:
+                self._add_audit(
+                    session,
+                    "authentication_failed",
+                    None,
+                    user.id if user is not None else None,
+                    {"username": normalized},
+                )
+                return None
+
+            raw_token = secrets.token_urlsafe(32)
+            now = utc_now_naive()
+            expires_at = now + ttl
+            user.last_login_at = now
+            user.updated_at = now
+            session.add(
+                AuthSession(
+                    user_id=user.id,
+                    token_hash=self._hash_token(raw_token),
+                    created_at=now,
+                    expires_at=expires_at,
+                )
+            )
+            self._add_audit(
+                session,
+                "authentication_succeeded",
+                user.id,
+                user.id,
+                {"username": normalized},
+            )
+            self._add_audit(
+                session,
+                "session_created",
+                user.id,
+                user.id,
+                {"expires_at": expires_at.isoformat()},
+            )
+            return user, raw_token
+
     def create_session(
         self,
         user_id: int,
         ttl: timedelta,
         actor_user_id: int | None,
     ) -> str:
+        """Issue a session for a trusted admin flow, never from raw credentials."""
         self._validate_session_ttl(ttl)
         raw_token = secrets.token_urlsafe(32)
         now = utc_now_naive()
         with self._session_factory.begin() as session:
-            user = self._require_user_for_update(session, user_id)
+            users = self._lock_users_for_update(session, user_id, actor_user_id)
+            user = users[user_id]
             if not user.is_active:
                 raise ValueError("active user not found")
             session.add(
@@ -167,6 +234,7 @@ class AuthService:
         actor_user_id: int | None,
     ) -> None:
         with self._session_factory.begin() as session:
+            self._lock_users_for_update(session, user_id, actor_user_id)
             auth_session = session.scalar(
                 select(AuthSession)
                 .where(
@@ -190,7 +258,8 @@ class AuthService:
     ) -> AuthUser:
         now = utc_now_naive()
         with self._session_factory.begin() as session:
-            user = self._require_user_for_update(session, user_id)
+            users = self._lock_users_for_update(session, user_id, actor_user_id)
+            user = users[user_id]
             if user.is_active is is_active:
                 return user
             user.is_active = is_active
@@ -215,7 +284,8 @@ class AuthService:
         encoded = password_hash(new_password)
         now = utc_now_naive()
         with self._session_factory.begin() as session:
-            user = self._require_user_for_update(session, user_id)
+            users = self._lock_users_for_update(session, user_id, actor_user_id)
+            user = users[user_id]
             user.password_hash = encoded
             user.updated_at = now
             self._revoke_active_sessions(session, user_id, now)
@@ -265,13 +335,25 @@ class AuthService:
         )
 
     @staticmethod
-    def _require_user_for_update(session: Session, user_id: int) -> AuthUser:
-        user = session.scalar(
-            select(AuthUser).where(AuthUser.id == user_id).with_for_update()
+    def _lock_users_for_update(
+        session: Session,
+        *user_ids: int | None,
+    ) -> dict[int, AuthUser]:
+        ordered_ids = sorted({user_id for user_id in user_ids if user_id is not None})
+        if not ordered_ids:
+            return {}
+        users = list(
+            session.scalars(
+                select(AuthUser)
+                .where(AuthUser.id.in_(ordered_ids))
+                .order_by(AuthUser.id)
+                .with_for_update()
+            )
         )
-        if user is None:
+        users_by_id = {user.id: user for user in users}
+        if len(users_by_id) != len(ordered_ids):
             raise ValueError("user not found")
-        return user
+        return users_by_id
 
     @staticmethod
     def _validate_session_ttl(ttl: timedelta) -> None:

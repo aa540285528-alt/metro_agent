@@ -10,7 +10,7 @@ from sqlalchemy.dialects import mysql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from metro_agent.auth.models import AuthBase, AuthSession, utc_now_naive
+from metro_agent.auth.models import AuthBase, AuthSession, AuthUser, utc_now_naive
 from metro_agent.auth.passwords import (
     normalize_username,
     password_hash,
@@ -114,6 +114,64 @@ def test_bad_credentials_do_not_authenticate(auth_service: AuthService) -> None:
     ]
 
 
+def test_login_atomically_authenticates_and_creates_resolvable_session(
+    auth_service: AuthService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = auth_service.create_user("operator", "CorrectHorseBattery1", "user", None)
+
+    def unsafe_separate_step(*_args, **_kwargs):
+        raise AssertionError("login must not compose public authentication steps")
+
+    monkeypatch.setattr(auth_service, "authenticate", unsafe_separate_step)
+    monkeypatch.setattr(auth_service, "create_session", unsafe_separate_step)
+
+    result = auth_service.login(
+        " OPERATOR ", "CorrectHorseBattery1", timedelta(hours=8)
+    )
+
+    assert result is not None
+    user, raw_token = result
+    assert user.id == created.id
+    assert user.last_login_at is not None
+    assert auth_service.resolve_session(raw_token) is not None
+    assert [event.event_type for event in auth_service.list_audit_events()][-2:] == [
+        "authentication_succeeded",
+        "session_created",
+    ]
+
+
+def test_password_reset_between_separate_steps_cannot_authorize_old_login(
+    auth_service: AuthService,
+) -> None:
+    user = auth_service.create_user("operator", "CorrectHorseBattery1", "user", None)
+    authenticated = auth_service.authenticate("operator", "CorrectHorseBattery1")
+    assert authenticated is not None
+
+    auth_service.reset_password(user.id, "AnotherSecurePassword2", user.id)
+    administrative_token = auth_service.create_session(
+        authenticated.id, timedelta(hours=1), user.id
+    )
+
+    assert auth_service.resolve_session(administrative_token) is not None
+    assert (
+        auth_service.login("operator", "CorrectHorseBattery1", timedelta(hours=1))
+        is None
+    )
+    assert (
+        auth_service.login("operator", "AnotherSecurePassword2", timedelta(hours=1))
+        is not None
+    )
+
+
+def test_failed_login_writes_only_failure_audit(auth_service: AuthService) -> None:
+    assert auth_service.login("missing", "WrongPassword1", timedelta(hours=1)) is None
+
+    assert [event.event_type for event in auth_service.list_audit_events()] == [
+        "authentication_failed"
+    ]
+
+
 def test_duplicate_username_and_invalid_role_are_rejected(
     auth_service: AuthService,
 ) -> None:
@@ -209,19 +267,83 @@ def test_session_ttl_allows_eight_hour_boundary(auth_service: AuthService) -> No
     assert auth_service.resolve_session(raw_token) is not None
 
 
-def test_user_mutations_share_for_update_lock_statement() -> None:
+def test_user_locks_are_sorted_and_use_for_update() -> None:
     captured = []
-    expected_user = object()
+    first = AuthUser(id=2, username="first", password_hash="hash", role="admin")
+    second = AuthUser(id=9, username="second", password_hash="hash", role="user")
 
     class CapturingSession:
-        def scalar(self, statement):
+        def scalars(self, statement):
             captured.append(statement)
-            return expected_user
+            return [first, second]
 
-    assert AuthService._require_user_for_update(CapturingSession(), 42) is expected_user
-    sql = str(captured[0].compile(dialect=mysql.dialect()))
+    locked = AuthService._lock_users_for_update(CapturingSession(), 9, 2, 9, None)
+    compiled = captured[0].compile(dialect=mysql.dialect())
+    sql = str(compiled)
+
+    assert locked == {2: first, 9: second}
     assert "FOR UPDATE" in sql
-    assert "users.id = %s" in sql
+    assert "ORDER BY users.id" in sql
+    assert [2, 9] in compiled.params.values()
+
+
+def test_user_and_session_mutations_share_sorted_user_lock_helper(
+    auth_service: AuthService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    actor = auth_service.create_user("admin", "CorrectHorseBattery1", "admin", None)
+    subject = auth_service.create_user(
+        "operator", "CorrectHorseBattery2", "user", actor.id
+    )
+    calls = []
+    original = AuthService._lock_users_for_update
+
+    def recording_lock(session, *user_ids):
+        calls.append(user_ids)
+        return original(session, *user_ids)
+
+    monkeypatch.setattr(
+        AuthService, "_lock_users_for_update", staticmethod(recording_lock)
+    )
+
+    token = auth_service.create_session(subject.id, timedelta(hours=1), actor.id)
+    auth_service.set_user_active(subject.id, True, actor.id)
+    auth_service.reset_password(subject.id, "AnotherSecurePassword2", actor.id)
+    auth_service.revoke_session(token, subject.id, actor.id)
+
+    assert calls == [
+        (subject.id, actor.id),
+        (subject.id, actor.id),
+        (subject.id, actor.id),
+        (subject.id, actor.id),
+    ]
+
+
+def test_revoke_locks_users_before_session_row(
+    auth_service: AuthService,
+    auth_session_factory,
+) -> None:
+    actor = auth_service.create_user("admin", "CorrectHorseBattery1", "admin", None)
+    subject = auth_service.create_user(
+        "operator", "CorrectHorseBattery2", "user", actor.id
+    )
+    token = auth_service.create_session(subject.id, timedelta(hours=1), actor.id)
+    statements = []
+
+    def capture_statement(_connection, _cursor, statement, parameters, *_args):
+        statements.append((" ".join(statement.lower().split()), parameters))
+
+    engine = auth_session_factory.kw["bind"]
+    event.listen(engine, "before_cursor_execute", capture_statement)
+    try:
+        auth_service.revoke_session(token, subject.id, actor.id)
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_statement)
+
+    selects = [item for item in statements if item[0].startswith("select")]
+    assert " from users " in f" {selects[0][0]} "
+    assert tuple(selects[0][1]) == tuple(sorted((actor.id, subject.id)))
+    assert " from auth_sessions " in f" {selects[1][0]} "
 
 
 def test_active_session_resolves_without_storing_raw_token(
