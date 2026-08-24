@@ -73,7 +73,7 @@ def build_page_content_security_policy() -> str:
             "script-src 'self' " + " ".join(script_hashes),
             "style-src 'self'",
             "font-src 'self'",
-            "img-src 'self' data: https://lh3.googleusercontent.com",
+            "img-src 'self' data:",
             "connect-src 'self'",
             "object-src 'none'",
             "base-uri 'self'",

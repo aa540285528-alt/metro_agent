@@ -933,8 +933,11 @@ def test_preview_serves_self_hosted_css_and_strict_script_csp(auth_api) -> None:
     assert "fonts.gstatic.com" not in page.text
     style_sources = csp.split("style-src", 1)[1].split(";", 1)[0]
     font_sources = csp.split("font-src", 1)[1].split(";", 1)[0]
+    image_sources = csp.split("img-src", 1)[1].split(";", 1)[0]
     assert style_sources.strip() == "'self'"
     assert font_sources.strip() == "'self'"
+    assert image_sources.strip() == "'self' data:"
+    assert "googleusercontent" not in csp
     assert css.status_code == 200
     assert css.headers["content-type"].startswith("text/css")
     assert len(css.content) > 1000

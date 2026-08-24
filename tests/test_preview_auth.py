@@ -119,6 +119,18 @@ def test_preview_self_hosts_material_symbols_and_uses_system_text_fonts() -> Non
     assert font_path.stat().st_size > 10_000
 
 
+def test_preview_has_no_external_resources_or_remote_profile_images() -> None:
+    html = _preview()
+
+    assert "http://" not in html
+    assert "https://" not in html
+    assert "googleusercontent" not in html
+    assert "<img" not in html
+    assert html.count(">account_circle</span>") == 2
+    assert "w-8 h-8" in html
+    assert "w-10 h-10" in html
+
+
 def test_preview_keeps_only_thread_working_state_in_local_storage() -> None:
     script = _inline_application_script()
 
