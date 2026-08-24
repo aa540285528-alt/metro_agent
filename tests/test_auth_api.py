@@ -771,6 +771,41 @@ def test_login_rate_limit_does_not_trust_x_forwarded_for(auth_api) -> None:
     ]
 
 
+def test_login_rate_limit_uses_request_client_host_not_forwarded_header(
+    auth_api,
+) -> None:
+    forwarded = {"X-Forwarded-For": "203.0.113.10"}
+    first = TestClient(auth_api.app, client=("10.0.0.1", 50000))
+    second = TestClient(auth_api.app, client=("10.0.0.2", 50000))
+    try:
+        first_responses = [
+            first.post(
+                "/api/auth/login",
+                headers=forwarded,
+                json={"username": "operator", "password": "WrongPassword9"},
+            )
+            for _ in range(6)
+        ]
+        second_response = second.post(
+            "/api/auth/login",
+            headers=forwarded,
+            json={"username": "operator", "password": "WrongPassword9"},
+        )
+    finally:
+        first.close()
+        second.close()
+
+    assert [response.status_code for response in first_responses] == [
+        401,
+        401,
+        401,
+        401,
+        401,
+        429,
+    ]
+    assert second_response.status_code == 401
+
+
 def test_login_database_error_is_not_recorded_as_password_failure(
     auth_api, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -66,6 +66,20 @@ def test_username_and_ip_are_independent_buckets() -> None:
     assert limiter.is_blocked("operator", "10.0.0.2") is False
 
 
+def test_missing_and_empty_client_ip_share_stable_unknown_bucket() -> None:
+    from metro_agent.auth.rate_limit import LoginRateLimiter
+
+    limiter = LoginRateLimiter()
+    for _ in range(4):
+        limiter.record_failure("operator", None)
+    limiter.record_failure("operator", "")
+
+    assert limiter.failure_count("operator", None) == 5
+    assert limiter.failure_count("operator", "") == 5
+    assert limiter.is_blocked("operator", None) is True
+    assert limiter.is_blocked("operator", "") is True
+
+
 def test_concurrent_failure_counting_is_thread_safe() -> None:
     from metro_agent.auth.rate_limit import LoginRateLimiter
 
