@@ -28,6 +28,7 @@ from metro_agent.auth.router import (
     get_auth_cookie_secure,
     get_auth_session_ttl_seconds,
 )
+from metro_agent.auth.rate_limit import LoginRateLimiter
 from metro_agent.auth.service import AuthService
 from metro_agent.storage.history.service import ConversationNotFound
 from metro_agent.observability.query_service import (
@@ -130,13 +131,17 @@ def create_app(
     history_service_factory: Callable[[], Any] = build_default_history_service,
     monitoring_service_factory: Callable[[], Any] | None = None,
     auth_service_factory: Callable[[], Any] = build_default_auth_service,
+    rate_limiter_factory: Callable[[], LoginRateLimiter] = LoginRateLimiter,
     chat_runner: Callable[..., str] = run_chat,
 ) -> FastAPI:
+    login_rate_limiter = rate_limiter_factory()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.graph = graph_factory()
         app.state.history_service = history_service_factory()
         app.state.auth_service = auth_service_factory()
+        app.state.login_rate_limiter = login_rate_limiter
         app.state.monitoring_service_factory = (
             monitoring_service_factory or build_default_monitoring_service
         )
@@ -152,6 +157,7 @@ def create_app(
         create_auth_router(
             cookie_secure=get_auth_cookie_secure(),
             session_ttl_seconds=get_auth_session_ttl_seconds(),
+            login_rate_limiter=login_rate_limiter,
         )
     )
 

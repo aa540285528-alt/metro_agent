@@ -3,11 +3,12 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
+import threading
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -30,6 +31,8 @@ _DUMMY_PASSWORD_HASH = (
     "$argon2id$v=19$m=65536,t=3,p=4$DWOPKfDPXCaXtDpklUZG8w$"
     "VwwEezJKpT2x7NLBEE6om5LoxH4jvf8/+tNm9V0hUiY"
 )
+_FIRST_ADMIN_LOCK = threading.Lock()
+_FIRST_ADMIN_DATABASE_LOCK = "metro_agent:first_admin"
 
 
 class AuthService:
@@ -53,30 +56,75 @@ class AuthService:
         normalized = normalize_username(username)
         encoded = password_hash(password)
         self._validate_role(role)
-        with self._session_factory.begin() as session:
-            if session.scalar(
-                select(AuthUser.id).where(AuthUser.username == normalized)
-            ):
-                raise ValueError("username already exists")
-            user = AuthUser(
-                username=normalized,
-                password_hash=encoded,
-                role=role,
-                is_active=True,
-            )
-            session.add(user)
-            try:
-                session.flush()
-            except IntegrityError:
-                raise ValueError("username already exists") from None
-            self._add_audit(
-                session,
-                "user_created",
-                actor_user_id,
-                user.id,
-                {"username": normalized, "role": role},
-            )
-            return user
+        if role == "admin" and actor_user_id is None:
+            with _FIRST_ADMIN_LOCK:
+                return self._create_user(
+                    normalized, encoded, role, actor_user_id, first_admin=True
+                )
+        return self._create_user(normalized, encoded, role, actor_user_id)
+
+    def _create_user(
+        self,
+        normalized: str,
+        encoded: str,
+        role: str,
+        actor_user_id: int | None,
+        *,
+        first_admin: bool = False,
+    ) -> AuthUser:
+        session = self._session_factory()
+        database_lock_acquired = False
+        try:
+            with session.begin():
+                if first_admin and session.bind is not None:
+                    if session.bind.dialect.name == "mysql":
+                        database_lock_acquired = (
+                            session.scalar(
+                                select(
+                                    func.get_lock(_FIRST_ADMIN_DATABASE_LOCK, 10)
+                                )
+                            )
+                            == 1
+                        )
+                        if not database_lock_acquired:
+                            raise RuntimeError("could not acquire first admin lock")
+                    active_admin = session.scalar(
+                        select(AuthUser.id)
+                        .where(
+                            AuthUser.role == "admin",
+                            AuthUser.is_active.is_(True),
+                        )
+                        .with_for_update()
+                    )
+                    if active_admin is not None:
+                        raise ValueError("active admin already exists")
+                if session.scalar(
+                    select(AuthUser.id).where(AuthUser.username == normalized)
+                ):
+                    raise ValueError("username already exists")
+                user = AuthUser(
+                    username=normalized,
+                    password_hash=encoded,
+                    role=role,
+                    is_active=True,
+                )
+                session.add(user)
+                try:
+                    session.flush()
+                except IntegrityError:
+                    raise ValueError("username already exists") from None
+                self._add_audit(
+                    session,
+                    "user_created",
+                    actor_user_id,
+                    user.id,
+                    {"username": normalized, "role": role},
+                )
+                return user
+        finally:
+            if database_lock_acquired:
+                session.scalar(select(func.release_lock(_FIRST_ADMIN_DATABASE_LOCK)))
+            session.close()
 
     def authenticate(self, username: str, password: str) -> AuthUser | None:
         """Verify credentials only; interactive login callers must use login()."""

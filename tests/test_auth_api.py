@@ -700,6 +700,125 @@ def test_login_uses_atomic_auth_service_method(auth_api, monkeypatch) -> None:
     assert calls == [("operator", "CorrectHorseBattery2", timedelta(seconds=3600))]
 
 
+def test_login_rate_limit_blocks_sixth_request_before_service_call(
+    auth_api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+    original_login = auth_api.service.login
+
+    def recording_login(username: str, password: str, ttl: timedelta):
+        nonlocal calls
+        calls += 1
+        return original_login(username, password, ttl)
+
+    monkeypatch.setattr(auth_api.service, "login", recording_login)
+
+    responses = [
+        login(auth_api.client, "operator", "WrongPassword9") for _ in range(6)
+    ]
+
+    assert [response.status_code for response in responses] == [
+        401,
+        401,
+        401,
+        401,
+        401,
+        429,
+    ]
+    assert calls == 5
+    assert responses[-1].headers["Retry-After"] == "60"
+    assert responses[-1].json() == {"detail": "Too many login attempts"}
+
+
+def test_successful_login_clears_failure_bucket(auth_api) -> None:
+    for _ in range(4):
+        assert login(auth_api.client, "operator", "WrongPassword9").status_code == 401
+    assert login(auth_api.client, "operator", "CorrectHorseBattery2").status_code == 200
+    auth_api.client.cookies.clear()
+
+    responses = [
+        login(auth_api.client, "operator", "WrongPassword9") for _ in range(6)
+    ]
+
+    assert [response.status_code for response in responses] == [
+        401,
+        401,
+        401,
+        401,
+        401,
+        429,
+    ]
+
+
+def test_login_rate_limit_does_not_trust_x_forwarded_for(auth_api) -> None:
+    responses = []
+    for index in range(6):
+        responses.append(
+            auth_api.client.post(
+                "/api/auth/login",
+                headers={"X-Forwarded-For": f"203.0.113.{index}"},
+                json={"username": "operator", "password": "WrongPassword9"},
+            )
+        )
+
+    assert [response.status_code for response in responses] == [
+        401,
+        401,
+        401,
+        401,
+        401,
+        429,
+    ]
+
+
+def test_login_database_error_is_not_recorded_as_password_failure(
+    auth_api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_login = auth_api.service.login
+
+    def fail_login(*_args, **_kwargs):
+        raise RuntimeError("auth database unavailable")
+
+    monkeypatch.setattr(auth_api.service, "login", fail_login)
+    with pytest.raises(RuntimeError, match="auth database unavailable"):
+        login(auth_api.client, "operator", "WrongPassword9")
+    monkeypatch.setattr(auth_api.service, "login", original_login)
+
+    assert (
+        auth_api.app.state.login_rate_limiter.failure_count("operator", "testclient")
+        == 0
+    )
+
+
+def test_create_app_builds_one_injected_rate_limiter(auth_api) -> None:
+    from metro_agent.auth.rate_limit import LoginRateLimiter
+
+    limiter = LoginRateLimiter()
+    factory_calls = 0
+
+    def limiter_factory():
+        nonlocal factory_calls
+        factory_calls += 1
+        return limiter
+
+    app = create_app(
+        graph_factory=lambda: object(),
+        history_service_factory=lambda: auth_api.history,
+        monitoring_service_factory=lambda: FakeMonitoringService(),
+        auth_service_factory=lambda: auth_api.service,
+        rate_limiter_factory=limiter_factory,
+        chat_runner=auth_api.runner,
+    )
+
+    with TestClient(app) as client:
+        assert login(client, "operator", "WrongPassword9").status_code == 401
+        assert login(client, "operator", "WrongPassword9").status_code == 401
+
+    assert factory_calls == 1
+    assert app.state.login_rate_limiter is limiter
+    assert limiter.failure_count("operator", "testclient") == 2
+
+
 def test_openapi_has_no_client_supplied_monitoring_user_id(auth_api) -> None:
     parameters = auth_api.app.openapi()["paths"]["/api/monitoring/summary"]["get"].get(
         "parameters", []

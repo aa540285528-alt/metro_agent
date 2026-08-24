@@ -15,6 +15,7 @@ from metro_agent.auth.dependencies import (
     require_admin,
     require_same_origin,
 )
+from metro_agent.auth.rate_limit import LoginRateLimiter
 
 
 class LoginRequest(BaseModel):
@@ -78,6 +79,7 @@ def create_auth_router(
     *,
     cookie_secure: bool,
     session_ttl_seconds: int,
+    login_rate_limiter: LoginRateLimiter,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -87,16 +89,26 @@ def create_auth_router(
         dependencies=[Depends(require_same_origin)],
     )
     def login(payload: LoginRequest, request: Request, response: Response):
+        client_ip = request.client.host if request.client is not None else "<unknown>"
+        if login_rate_limiter.is_blocked(payload.username, client_ip):
+            retry_after = login_rate_limiter.retry_after(payload.username, client_ip)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many login attempts",
+                headers={"Retry-After": str(retry_after)},
+            )
         result = request.app.state.auth_service.login(
             payload.username,
             payload.password,
             timedelta(seconds=session_ttl_seconds),
         )
         if result is None:
+            login_rate_limiter.record_failure(payload.username, client_ip)
             raise HTTPException(
                 status_code=401,
                 detail="Invalid username or password",
             )
+        login_rate_limiter.clear(payload.username, client_ip)
         user, raw_token = result
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
