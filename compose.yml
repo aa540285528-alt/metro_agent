@@ -1,14 +1,16 @@
 services:
   app:
-    image: metro-agent:${METRO_AGENT_IMAGE_TAG:-local}
+    image: ${METRO_AGENT_IMAGE:-metro-agent:local}
     build: .
     environment:
       DATABASE_URL: "postgresql+psycopg://metro_agent:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/metro_agent"
-      AUTH_DATABASE_URL: "mysql+pymysql://metro_auth:${AUTH_MYSQL_PASSWORD:?请在 .env 中设置 AUTH_MYSQL_PASSWORD}@mysql:3306/metro_auth"
+      AUTH_DATABASE_URL: "mysql+pymysql://metro_auth:${AUTH_MYSQL_PASSWORD:?请在 .env 中设置 AUTH_MYSQL_PASSWORD}@mysql:3306/metro_auth?ssl_ca=/etc/mysql/ca/ca.pem&ssl_verify_cert=true&ssl_verify_identity=true"
       AUTH_SESSION_PEPPER: "${AUTH_SESSION_PEPPER:?请在 .env 中设置 AUTH_SESSION_PEPPER}"
       AUTH_COOKIE_SECURE: "${AUTH_COOKIE_SECURE:-false}"
       AUTH_SESSION_TTL_SECONDS: "${AUTH_SESSION_TTL_SECONDS:-28800}"
       SHORT_TERM_MEMORY_REDIS_URL: redis://redis:6379
+      CHROMA_DB_DIR: /var/lib/metro-agent/chroma/current
+      MEMORY_CHROMA_DB_DIR: /var/lib/metro-agent/memory-chroma/current
       WIREMOCK_BASE_URL: http://wiremock:8080
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
       DEEPSEEK_BASE_URL: "${DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
@@ -19,6 +21,10 @@ services:
       OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://host.docker.internal:11434}"
     ports:
       - "127.0.0.1:8000:8000"
+    volumes:
+      - mysql_ca:/etc/mysql/ca:ro
+      - chroma_data:/var/lib/metro-agent/chroma
+      - memory_chroma_data:/var/lib/metro-agent/memory-chroma
     depends_on:
       db-migrate:
         condition: service_completed_successfully
@@ -31,7 +37,7 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready', timeout=3)"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -39,7 +45,7 @@ services:
     restart: unless-stopped
 
   db-migrate:
-    image: metro-agent:${METRO_AGENT_IMAGE_TAG:-local}
+    image: ${METRO_AGENT_IMAGE:-metro-agent:local}
     command: ["alembic", "upgrade", "head"]
     environment:
       DATABASE_URL: "postgresql+psycopg://metro_agent:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/metro_agent"
@@ -49,10 +55,12 @@ services:
     restart: "no"
 
   auth-migrate:
-    image: metro-agent:${METRO_AGENT_IMAGE_TAG:-local}
+    image: ${METRO_AGENT_IMAGE:-metro-agent:local}
     command: ["alembic", "-c", "alembic-auth.ini", "upgrade", "head"]
     environment:
-      AUTH_DATABASE_URL: "mysql+pymysql://metro_auth:${AUTH_MYSQL_PASSWORD:?请在 .env 中设置 AUTH_MYSQL_PASSWORD}@mysql:3306/metro_auth"
+      AUTH_DATABASE_URL: "mysql+pymysql://metro_auth:${AUTH_MYSQL_PASSWORD:?请在 .env 中设置 AUTH_MYSQL_PASSWORD}@mysql:3306/metro_auth?ssl_ca=/etc/mysql/ca/ca.pem&ssl_verify_cert=true&ssl_verify_identity=true"
+    volumes:
+      - mysql_ca:/etc/mysql/ca:ro
     depends_on:
       mysql:
         condition: service_healthy
@@ -73,11 +81,42 @@ services:
       retries: 20
     restart: unless-stopped
 
+  mysql-cert-init:
+    image: mysql:8.4
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        if [ -s /ca/ca.pem ] && [ -s /server/server-cert.pem ] && [ -s /server/server-key.pem ]; then
+          exit 0
+        fi
+        rm -f /ca/* /server/*
+        trap 'rm -f /tmp/ca-key.pem /tmp/server.csr /tmp/server.cnf' EXIT
+        umask 077
+        openssl genrsa -out /tmp/ca-key.pem 4096
+        openssl req -x509 -new -sha256 -days 3650 -key /tmp/ca-key.pem -out /ca/ca.pem -subj "/CN=Metro Agent Pilot CA"
+        printf '%s\n' '[req]' 'distinguished_name=dn' 'req_extensions=v3_req' '[dn]' '[v3_req]' 'subjectAltName=DNS:mysql,DNS:localhost,IP:127.0.0.1' > /tmp/server.cnf
+        openssl genrsa -out /server/server-key.pem 2048
+        openssl req -new -key /server/server-key.pem -out /tmp/server.csr -subj "/CN=mysql" -config /tmp/server.cnf -reqexts v3_req
+        openssl x509 -req -sha256 -days 397 -in /tmp/server.csr -CA /ca/ca.pem -CAkey /tmp/ca-key.pem -CAcreateserial -out /server/server-cert.pem -extfile /tmp/server.cnf -extensions v3_req
+        chown mysql:mysql /ca/ca.pem /server/server-cert.pem /server/server-key.pem
+        chmod 0444 /ca/ca.pem /server/server-cert.pem
+        chmod 0600 /server/server-key.pem
+        rm -f /tmp/ca-key.pem
+    volumes:
+      - mysql_ca:/ca
+      - mysql_server_certs:/server
+    restart: "no"
+
   mysql:
     image: mysql:8.4
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
+      - --require-secure-transport=ON
+      - --ssl-ca=/etc/mysql/ca/ca.pem
+      - --ssl-cert=/etc/mysql/server-certs/server-cert.pem
+      - --ssl-key=/etc/mysql/server-certs/server-key.pem
     environment:
       MYSQL_DATABASE: metro_auth
       MYSQL_USER: metro_auth
@@ -86,10 +125,15 @@ services:
       TZ: UTC
     volumes:
       - mysql_data:/var/lib/mysql
+      - mysql_ca:/etc/mysql/ca:ro
+      - mysql_server_certs:/etc/mysql/server-certs:ro
+    depends_on:
+      mysql-cert-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD-SHELL
-        - 'mysqladmin ping -h 127.0.0.1 -u"$$MYSQL_USER" --password="$$MYSQL_PASSWORD" --silent'
+        - 'mysqladmin ping -h mysql --ssl-mode=VERIFY_IDENTITY --ssl-ca=/etc/mysql/ca/ca.pem -u"$$MYSQL_USER" --password="$$MYSQL_PASSWORD" --silent'
       interval: 5s
       timeout: 5s
       retries: 30
@@ -98,6 +142,9 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -116,3 +163,8 @@ services:
 volumes:
   postgres_data:
   mysql_data:
+  mysql_ca:
+  mysql_server_certs:
+  chroma_data:
+  memory_chroma_data:
+  redis_data:

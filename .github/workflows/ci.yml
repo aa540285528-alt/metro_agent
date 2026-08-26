@@ -21,10 +21,8 @@ jobs:
       mysql:
         image: mysql:8.4
         env:
-          MYSQL_DATABASE: metro_auth_test
-          MYSQL_USER: metro_auth
-          MYSQL_PASSWORD: ci-auth-password
           MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_ROOT_HOST: '%'
           TZ: UTC
         ports:
           - 3306:3306
@@ -34,15 +32,15 @@ jobs:
           --health-timeout 5s
           --health-retries 30
     env:
-      AUTH_DATABASE_URL: mysql+pymysql://metro_auth:ci-auth-password@127.0.0.1:3306/metro_auth_test
-      AUTH_MYSQL_TEST_URL: mysql+pymysql://metro_auth:ci-auth-password@127.0.0.1:3306/metro_auth_test
+      AUTH_MYSQL_ADMIN_URL: mysql+pymysql://root:ci-root-password@127.0.0.1:3306/mysql
+      AUTH_MYSQL_TEST_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
+      AUTH_MYSQL_TEST_DATABASE: metro_auth_test_github_${{ github.run_id }}_${{ github.run_attempt }}
       AUTH_SESSION_PEPPER: ci-test-pepper-not-for-production
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - run: pip install ".[dev]"
-      - run: alembic -c alembic-auth.ini upgrade head
       - run: pytest tests/integration/test_auth_mysql.py -q
   secrets:
     runs-on: ubuntu-latest

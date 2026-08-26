@@ -44,10 +44,16 @@ def test_ci_mysql_job_runs_migration_and_dedicated_integration_suite() -> None:
     commands = _run_commands(job)
 
     assert mysql["image"] == "mysql:8.4"
-    assert mysql["env"]["MYSQL_DATABASE"].endswith("_test")
-    assert environment["AUTH_DATABASE_URL"].startswith("mysql+pymysql://")
-    assert environment["AUTH_DATABASE_URL"].endswith("/metro_auth_test")
-    assert environment["AUTH_MYSQL_TEST_URL"] == environment["AUTH_DATABASE_URL"]
+    assert "MYSQL_DATABASE" not in mysql["env"]
+    assert environment["AUTH_MYSQL_ADMIN_URL"].startswith("mysql+pymysql://root:")
+    assert environment["AUTH_MYSQL_ADMIN_URL"].endswith("/mysql")
+    assert environment["AUTH_MYSQL_TEST_RUN_ID"] == (
+        "github-${{ github.run_id }}-${{ github.run_attempt }}"
+    )
+    assert environment["AUTH_MYSQL_TEST_DATABASE"] == (
+        "metro_auth_test_github_${{ github.run_id }}_${{ github.run_attempt }}"
+    )
+    assert "AUTH_DATABASE_URL" not in environment
+    assert "AUTH_MYSQL_TEST_URL" not in environment
     assert environment["AUTH_SESSION_PEPPER"]
-    assert "alembic -c alembic-auth.ini upgrade head" in commands
     assert "pytest tests/integration/test_auth_mysql.py -q" in commands

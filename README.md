@@ -35,7 +35,7 @@ Metro Agent 是面向地铁通信运维场景的多 Agent 助手。本仓库包�
    docker compose logs db-migrate auth-migrate
    ```
 
-   `db-migrate` 和 `auth-migrate` 必须显示退出码 `0`；`app` 的 `/api/health` 必须为 healthy。需要本地模拟工具时使用 `docker compose --profile mock up --build -d`。
+   `db-migrate` 和 `auth-migrate` 必须显示退出码 `0`；`/api/health` 仅表示进程存活，Compose 以会检查 MySQL、PostgreSQL、Redis 的 `/api/ready` 判断是否可接流量。需要本地模拟工具时使用 `docker compose --profile mock up --build -d`。
 
 4. 首次且仅首次，交互式写入第一个管理员：
 
@@ -73,53 +73,31 @@ Metro Agent 是面向地铁通信运维场景的多 Agent 助手。本仓库包�
 
 旧版本可能使用自由字符串或裸数字 owner。新账号**绝不自动继承裸数字 owner**，即使旧值刚好等于新的 MySQL 自增 ID。每个旧身份必须由管理员确认后显式映射。
 
-1. 停止写流量，备份 PostgreSQL、Redis、知识索引 `chroma_db` 和长期记忆 `memory_chroma_db`，并记录两个 Alembic revision、镜像 digest、Chroma collection 名称与快照校验值。长期记忆备份必须与 PostgreSQL 映射前快照属于同一变更窗口。
-2. 在 MySQL 管理视图确认目标账号 ID，形成经审批的 `legacy_owner -> auth:<id>` 映射表；一名旧用户只能映射到一个新账号。该审批映射必须同时用于 PostgreSQL owner/Trace 和 `memory_chroma_db` 元数据，不能分别猜测。
-3. 先做冲突和影响检查。以下模板使用 `psql` 变量的安全字面量引用；不要拼接未经审核的 SQL，也不要全量更新数字 owner：
+先执行协调备份，再使用 `deploy/operations/legacy-owner-preview.sql` 做只读预览。预览事务固定 `ROLLBACK` 并报告精确 `candidate_count`；此后进入**人工停点**，审批人填写 `EXPECTED_COUNT` 和备份引用，才能运行 `legacy-owner-apply.sql`。脚本锁定候选表并验证更新影响数，任何影响数不一致都会中止。不要全量迁移裸数字 owner，也不要把 PostgreSQL 与 `memory_chroma_db` 的映射分别猜测。
 
-   ```sql
-   \set legacy_owner 'legacy-alice'
-   \set target_owner 'auth:42'
-   BEGIN;
-   SELECT owner_id, count(*) FROM conversations
-     WHERE owner_id IN (:'legacy_owner', :'target_owner') GROUP BY owner_id;
-   SELECT user_id, count(*) FROM agent_traces
-     WHERE user_id IN (:'legacy_owner', :'target_owner') GROUP BY user_id;
-   SELECT owner_id, count(*) FROM conversations
-     WHERE owner_id ~ '^[0-9]+$' GROUP BY owner_id ORDER BY owner_id;
-   ROLLBACK;
-   ```
-
-4. 逐条映射并核对影响行数：
-
-   ```sql
-   \set legacy_owner 'legacy-alice'
-   \set target_owner 'auth:42'
-   BEGIN;
-   UPDATE conversations SET owner_id = :'target_owner'
-     WHERE owner_id = :'legacy_owner';
-   UPDATE agent_traces SET user_id = :'target_owner'
-     WHERE user_id = :'legacy_owner';
-   SELECT owner_id, count(*) FROM conversations
-     WHERE owner_id = :'target_owner' GROUP BY owner_id;
-   SELECT user_id, count(*) FROM agent_traces
-     WHERE user_id = :'target_owner' GROUP BY user_id;
-   COMMIT;
-   ```
-
-5. `conversation_messages` 通过 `conversation_id` 随父会话归属，无需单独更新；Trace 子表通过 `trace_id` 关联，也不得直接改写。历史 JSON artifact 如含旧用户标识，应按保留策略单独清点，不能用无条件 JSON 替换。
-6. 对 `memory_chroma_db` 的长期记忆先按 metadata `user_id = legacy_owner` 导出 ID、完整 metadata 和影响数量，再仅把这批记录的 `user_id` 更新为经审批的 `auth:<id>`。不得修改 `chroma_db` 知识索引，不得用全文替换猜测身份。验证旧 ID 计数为 `0`、目标 ID 计数按影响数量增加，并抽查内容、向量检索和跨用户不可见。
-7. Redis checkpoint 是短期状态。排空旧请求后，仅删除已确认映射用户的旧 checkpoint，要求用户从已迁移的 PostgreSQL 历史开启新轮次；不要猜测或批量改写 Redis 内部键格式。
-8. 验证目标用户可见、其他用户得到 `404`，保存 SQL、Chroma 导出、审批人、备份位置、影响数量、验证证据与回滚结果。数据库回滚使用事务/备份；长期记忆回滚使用变更前 `memory_chroma_db` 快照或导出的原 metadata 恢复，并再次验证旧身份与目标身份计数。
+完整可执行命令、Chroma 原子目录切换、Redis checkpoint 处理和回滚要求见 `docs/operations/legacy-owner-migration.md`。
+协调流程必须同时保留长期记忆备份，并在验收单记录长期记忆回滚证据。
 
 ## 运维基线
 
-- **健康与迁移**：监控 `/api/health`、容器健康状态和两个一次性迁移作业；每次发布记录主库与身份库 revision。
-- **备份恢复**：分别备份 MySQL、PostgreSQL、知识索引 `chroma_db` 和用户长期记忆 `memory_chroma_db`；Redis checkpoint 可按短期状态重建。恢复演练必须在隔离环境完成并记录 RPO/RTO、长期记忆备份校验和长期记忆回滚结果。
+- **健康与迁移**：`/api/health` 是 liveness，`/api/ready` 会实际执行两次 `SELECT 1` 和 Redis `PING`；任一依赖失败返回不含 DSN 的 `503`。监控容器健康状态和两个一次性迁移作业，每次发布记录主库与身份库 revision。
 - **秘密与日志**：`.env` 仅限部署账号读取，定期轮换数据库密码。轮换 `AUTH_SESSION_PEPPER` 会使全部现有会话失效。日志和外部观测不得包含密码、原始 Cookie、完整工具敏感参数。
-- **升级回滚**：发布前备份，记录镜像 digest；迁移成功后再切换镜像。回滚前检查 Alembic downgrade 是否会丢数据，默认优先前滚修复，不能盲目降库。
 - **HTTPS**：正式环境必须由可信反向代理终止 TLS，设置 `AUTH_COOKIE_SECURE=true`，限制来源、请求体和访问日志，并验证 Cookie 属性。
-- **验证**：离线执行 `python -m pytest -m "not live and not integration"`；真实 MySQL 集成测试只允许对名称以 `_test` 结尾的专用库运行。
+- **验证**：离线执行 `python -m pytest -m "not live and not integration"`。CI 显式提供唯一 `AUTH_MYSQL_TEST_RUN_ID` 和完全匹配的 `AUTH_MYSQL_TEST_DATABASE`；测试只接收连接系统库 `mysql` 的 admin URL，并写入 run ID、数据库名、随机 token 三元所有权标记。只有三者精确匹配才允许 downgrade/drop。
+
+### 身份迁移中断恢复
+
+MySQL DDL 隐式提交。auth-migrate 失败会继续阻断 `app`。执行 `deploy/operations/inspect-mysql-partial-ddl.sh` 保存 Alembic 与 `information_schema` 证据；禁止盲目 `stamp`。空身份库可经审批删除专用空身份库重建，已有身份数据必须由 DBA 审核补偿迁移。完整处置见 `docs/operations/mysql-alembic-partial-ddl-recovery.md`。
+
+### MySQL TLS 与证书轮换
+
+`mysql-cert-init` 在只用于本机试点的命名卷生成 CA 与服务端证书，SAN 包含 `mysql`、`localhost`、`127.0.0.1`；CA 私钥生成签发后立即删除。MySQL 强制 `require_secure_transport=ON`，应用和 `auth-migrate` 只读挂载 CA，不接触服务端私钥，并同时验证证书链与主机身份。
+
+轮换前先完成一致性备份并停止应用。执行 `docker compose down`，用 `docker volume ls` 确认当前 Compose 项目名后删除该项目的 `<project>_mysql_ca` 与 `<project>_mysql_server_certs`，运行 `docker compose run --rm mysql-cert-init` 重新生成，再执行 `docker compose up -d` 并验证 `/api/ready`。该流程会更换试点 CA，不能用于多主机信任分发。正式环境应以组织的生产 PKI 替换一次性证书卷，证书 SAN 必须覆盖 Compose 服务名 `mysql`，并保留同等的身份验证参数和私钥隔离。
+
+### 一致性备份、恢复与镜像回滚
+
+使用 `deploy/operations/backup-all.sh` 协调执行 `mysqldump --single-transaction`、`pg_dump`、Chroma 快照和 Redis `SAVE`。`restore-all.sh` 固定按 **MySQL -> PostgreSQL -> Chroma -> Redis** 恢复，并比较两个 Alembic revision、owner-counts 和 `/api/ready`。`rollback-image.sh` 只接受完整 `METRO_AGENT_IMAGE=...@sha256:...`，使用 `--no-build` 回滚镜像。可执行命令和中止条件见 `docs/operations/coordinated-backup-restore.md`。
 
 ## 已知限制
 

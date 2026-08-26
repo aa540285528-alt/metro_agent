@@ -18,7 +18,7 @@
 
 - [ ] 全新环境执行 `docker compose up --build -d` 成功；数据库无宿主机端口，应用仅监听 `127.0.0.1:8000`。
 - [ ] `db-migrate`、`auth-migrate` 均退出码 `0`，已记录两个 Alembic revision。
-- [ ] `/api/health` 与 PostgreSQL、MySQL、Redis 健康检查通过。
+- [ ] `/api/health` liveness 与 `/api/ready` readiness 均通过；readiness 已实际覆盖 PostgreSQL、MySQL、Redis。
 - [ ] CI 实际完成 Docker image build，并记录应用镜像 digest。
 - [ ] `POSTGRES_PASSWORD`、`AUTH_MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD`、至少 32 字节 pepper 均独立生成且未使用样例值。
 - [ ] gitleaks/秘密扫描通过；日志抽查不含密码、原始 Cookie、token 或工具敏感参数。
@@ -33,7 +33,7 @@
 - [ ] 禁用用户后旧会话失效；改密后旧会话失效；最后一个活动管理员不可禁用或降级。
 - [ ] 登录失败达到阈值后返回 `429` 和有效 `Retry-After`，成功登录后预算行为符合设计。
 - [ ] 账号创建、角色变更、禁用、改密、登录和登出均能在 MySQL 审计表追踪。
-- [ ] 真实 MySQL 并发锁测试通过：不同 AuthService/连接并发 bootstrap 最终只有一个首管理员。
+- [ ] 真实 MySQL 并发锁测试通过：两个 `multiprocessing` spawn 进程跨进程并发 bootstrap，最终只有一个首管理员。
 
 ## 数据与恢复
 
@@ -44,6 +44,10 @@
 - [ ] legacy 迁移同时核对 `conversations.owner_id`、`agent_traces.user_id`、`memory_chroma_db` 元数据 `user_id`、关联 artifact 和 Redis 短期 checkpoint；记录每个来源的备份、影响数量、验证结果和回滚证据。
 - [ ] `memory_chroma_db` 迁移后旧 `user_id` 计数为零、目标 `auth:<id>` 增量与影响数量一致，抽查检索和跨用户隔离；长期记忆回滚已用快照或原 metadata 演练，且未改写 `chroma_db`。
 - [ ] 镜像回滚和数据库前滚修复步骤已演练；任何有损 downgrade 都有单独审批。
+- [ ] 迁移中断恢复演练完成：已保存 `information_schema` 对账证据，未盲目 `stamp`，`auth-migrate` 失败时 `app` 保持阻断。
+- [ ] legacy 迁移已先运行回滚预览，经人工填写 `EXPECTED_COUNT` 和备份引用后才 apply；不一致时已验证自动中止。
+- [ ] 一致性备份恢复演练使用脚本按 MySQL -> PostgreSQL -> Chroma -> Redis 恢复，Chroma 完成原子目录切换并保留回滚目录。
+- [ ] digest 回滚仅使用完整 `METRO_AGENT_IMAGE=...@sha256:...`，两个 Alembic revision、owner-counts 和 `/api/ready` 均复核通过。
 
 ## 质量与已知限制
 

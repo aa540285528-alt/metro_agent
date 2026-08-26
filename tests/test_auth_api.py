@@ -911,6 +911,77 @@ def test_openapi_has_no_client_supplied_monitoring_user_id(auth_api) -> None:
     assert "user_id" not in {parameter["name"] for parameter in parameters}
 
 
+def test_liveness_does_not_depend_on_readiness(auth_api) -> None:
+    def unavailable() -> None:
+        raise ConnectionError("mysql+pymysql://secret@mysql/metro_auth")
+
+    app = create_app(
+        graph_factory=lambda: object(),
+        history_service_factory=lambda: auth_api.history,
+        monitoring_service_factory=lambda: FakeMonitoringService(),
+        auth_service_factory=lambda: auth_api.service,
+        readiness_checker=unavailable,
+        chat_runner=auth_api.runner,
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_readiness_returns_ok_when_all_dependencies_are_available(auth_api) -> None:
+    calls = 0
+
+    def ready() -> None:
+        nonlocal calls
+        calls += 1
+
+    app = create_app(
+        graph_factory=lambda: object(),
+        history_service_factory=lambda: auth_api.history,
+        monitoring_service_factory=lambda: FakeMonitoringService(),
+        auth_service_factory=lambda: auth_api.service,
+        readiness_checker=ready,
+        chat_runner=auth_api.runner,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/api/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
+    assert calls == 1
+
+
+@pytest.mark.parametrize("dependency", ["auth mysql", "business postgres", "redis"])
+def test_readiness_dependency_failure_is_503_without_dsn(
+    auth_api, dependency: str
+) -> None:
+    def unavailable() -> None:
+        raise ConnectionError(
+            f"{dependency}: mysql+pymysql://operator:password@mysql/metro_auth"
+        )
+
+    app = create_app(
+        graph_factory=lambda: object(),
+        history_service_factory=lambda: auth_api.history,
+        monitoring_service_factory=lambda: FakeMonitoringService(),
+        auth_service_factory=lambda: auth_api.service,
+        readiness_checker=unavailable,
+        chat_runner=auth_api.runner,
+    )
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/api/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Service not ready"}
+    assert "password" not in response.text
+    assert "mysql+pymysql" not in response.text
+
+
 def test_preview_serves_self_hosted_css_and_strict_script_csp(auth_api) -> None:
     page = auth_api.client.get("/")
     css = auth_api.client.get("/static/tailwind.css")

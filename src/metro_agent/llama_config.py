@@ -5,6 +5,8 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 import os
 from pathlib import Path
 
+from metro_agent.storage_paths import configured_storage_path
+
 
 # LlamaIndex基础配置
 def init_llama_index_components():
@@ -60,7 +62,7 @@ SIMILARITY_CUTOFF = read_similarity_cutoff()
 
 # RAG检索数据库配置
 BASE_DIR = Path(__file__).resolve().parent
-CHROMA_DB_DIR = BASE_DIR / "chroma_db"
+CHROMA_DB_DIR = configured_storage_path("CHROMA_DB_DIR", BASE_DIR / "chroma_db")
 COLLECTION_NAME = "Metro_Knowledge_Obsidian_v1"
 INDEX_REGISTRY_COLLECTION_NAME = "Metro_Knowledge_Index_Registry_v1"
 KNOWLEDGE_PATH="d:/AIknowledge/wiki"

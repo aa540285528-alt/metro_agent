@@ -81,11 +81,11 @@ def test_compose_injects_auth_configuration_and_limits_public_ports() -> None:
         "OLLAMA_BASE_URL",
     ):
         assert provider_variable in environment
-    assert "api/health" in " ".join(app["healthcheck"]["test"])
+    assert "api/ready" in " ".join(app["healthcheck"]["test"])
     assert app["restart"] == "unless-stopped"
 
     assert services["wiremock"]["profiles"] == ["mock"]
-    assert "depends_on" not in services["mysql"]
+    assert set(services["mysql"]["depends_on"]) == {"mysql-cert-init"}
 
 
 def test_compose_requires_database_passwords_and_session_pepper() -> None:
@@ -101,3 +101,79 @@ def test_compose_requires_database_passwords_and_session_pepper() -> None:
         assert f"${{{variable}:?" in serialized
 
     assert "CHANGE_ME" not in serialized
+
+
+def test_compose_enforces_verified_mysql_tls_without_exposing_private_key() -> None:
+    compose = _compose()
+    services = compose["services"]
+    cert_init = services["mysql-cert-init"]
+    mysql = services["mysql"]
+
+    assert cert_init["image"] == "mysql:8.4"
+    assert cert_init["restart"] == "no"
+    assert isinstance(cert_init["command"], list)
+    assert len(cert_init["command"]) == 1
+    cert_script = cert_init["command"][0]
+    assert "subjectAltName" in cert_script
+    assert all(name in cert_script for name in ("mysql", "localhost", "127.0.0.1"))
+    assert "ca-key" in cert_script and "rm" in cert_script
+    assert "/ca/ca-key" not in cert_script
+    assert "mysql_ca:/ca" in cert_init["volumes"]
+    assert "mysql_server_certs:/server" in cert_init["volumes"]
+    assert mysql["depends_on"]["mysql-cert-init"]["condition"] == (
+        "service_completed_successfully"
+    )
+    assert any("require-secure-transport=ON" in value for value in mysql["command"])
+    assert "VERIFY_IDENTITY" in " ".join(mysql["healthcheck"]["test"])
+    assert "--ssl-ca" in " ".join(mysql["healthcheck"]["test"])
+
+    for service_name in ("app", "auth-migrate"):
+        service = services[service_name]
+        auth_url = service["environment"]["AUTH_DATABASE_URL"]
+        assert "ssl_ca=" in auth_url
+        assert "ssl_verify_cert=true" in auth_url
+        assert "ssl_verify_identity=true" in auth_url
+        mounts = " ".join(service["volumes"])
+        assert "mysql_ca" in mounts
+        assert "mysql_server_certs" not in mounts
+        assert "server-key.pem" not in mounts
+
+    assert set(compose["volumes"]) >= {
+        "mysql_ca",
+        "mysql_server_certs",
+    }
+
+
+def test_compose_supports_full_image_reference_for_digest_rollback() -> None:
+    services = _compose()["services"]
+
+    for service_name in ("app", "db-migrate", "auth-migrate"):
+        assert services[service_name]["image"] == (
+            "${METRO_AGENT_IMAGE:-metro-agent:local}"
+        )
+
+
+def test_compose_persists_redis_and_both_chroma_stores_for_recovery() -> None:
+    compose = _compose()
+    services = compose["services"]
+    app = services["app"]
+    redis = services["redis"]
+
+    assert app["environment"]["CHROMA_DB_DIR"] == (
+        "/var/lib/metro-agent/chroma/current"
+    )
+    assert app["environment"]["MEMORY_CHROMA_DB_DIR"] == (
+        "/var/lib/metro-agent/memory-chroma/current"
+    )
+    assert "chroma_data:/var/lib/metro-agent/chroma" in app["volumes"]
+    assert (
+        "memory_chroma_data:/var/lib/metro-agent/memory-chroma"
+        in app["volumes"]
+    )
+    assert "redis_data:/data" in redis["volumes"]
+    assert "appendonly" in " ".join(redis["command"]).lower()
+    assert set(compose["volumes"]) >= {
+        "chroma_data",
+        "memory_chroma_data",
+        "redis_data",
+    }

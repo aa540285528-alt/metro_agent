@@ -33,6 +33,7 @@ from metro_agent.auth.router import (
 )
 from metro_agent.auth.rate_limit import LoginRateLimiter
 from metro_agent.auth.service import AuthService
+from metro_agent.readiness import check_default_readiness
 from metro_agent.storage.history.service import ConversationNotFound
 from metro_agent.observability.query_service import (
     MonitoringFilter,
@@ -172,6 +173,7 @@ def create_app(
     auth_service_factory: Callable[[], Any] = build_default_auth_service,
     rate_limiter_factory: Callable[[], LoginRateLimiter] = LoginRateLimiter,
     chat_runner: Callable[..., str] = run_chat,
+    readiness_checker: Callable[[], None] = check_default_readiness,
 ) -> FastAPI:
     login_rate_limiter = rate_limiter_factory()
 
@@ -222,6 +224,17 @@ def create_app(
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/ready")
+    def ready() -> dict[str, str]:
+        try:
+            readiness_checker()
+        except Exception as exc:
+            logger.error("operation=readiness error_type=%s", type(exc).__name__)
+            raise HTTPException(
+                status_code=503, detail="Service not ready"
+            ) from None
+        return {"status": "ready"}
 
     @app.get("/api/monitoring/summary")
     def monitoring_summary(

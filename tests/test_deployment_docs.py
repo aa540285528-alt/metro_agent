@@ -110,3 +110,61 @@ def test_env_example_lists_required_pilot_secrets() -> None:
     ):
         assert variable in env_example
     assert "正式 HTTPS 部署必须改为 true" in env_example
+
+
+def test_docs_cover_mysql_ddl_recovery_tls_rotation_and_app_blocking() -> None:
+    readme = _read("README.md")
+    acceptance = _read("docs/operations/internal-pilot-auth-acceptance.md")
+    recovery = _read("docs/operations/mysql-alembic-partial-ddl-recovery.md")
+
+    for expected in (
+        "MySQL DDL 隐式提交",
+        "docker compose stop app",
+        "alembic -c alembic-auth.ini current",
+        "alembic -c alembic-auth.ini show",
+        "information_schema",
+        "禁止盲目 `stamp`",
+        "删除专用空身份库重建",
+        "DBA 审核补偿迁移",
+        "auth-migrate 失败",
+        "阻断 `app`",
+        "证书轮换",
+        "生产 PKI",
+    ):
+        assert expected in readme + recovery
+    assert "迁移中断恢复演练" in acceptance
+    assert "禁止盲目执行 `alembic stamp`" in recovery
+    assert "deploy/operations/inspect-mysql-partial-ddl.sh" in recovery
+
+
+def test_docs_define_guarded_legacy_and_executable_disaster_recovery() -> None:
+    readme = _read("README.md")
+    acceptance = _read("docs/operations/internal-pilot-auth-acceptance.md")
+    legacy = _read("docs/operations/legacy-owner-migration.md")
+    recovery = _read("docs/operations/coordinated-backup-restore.md")
+
+    for expected in (
+        "人工停点",
+        "EXPECTED_COUNT",
+        "GET DIAGNOSTICS",
+        "影响数不一致",
+        "原子目录切换",
+        "mysqldump --single-transaction",
+        "pg_dump",
+        "docker compose stop app",
+        "MySQL -> PostgreSQL -> Chroma -> Redis",
+        "METRO_AGENT_IMAGE",
+        "@sha256:",
+    ):
+        assert expected in readme + legacy + recovery
+    for expected in (
+        "一致性备份恢复演练",
+        "EXPECTED_COUNT",
+        "原子目录切换",
+        "digest 回滚",
+    ):
+        assert expected in acceptance
+    assert "备份是 apply 的前置条件" in legacy
+    assert "候选数不等于 EXPECTED_COUNT" in legacy
+    assert "MySQL -> PostgreSQL -> Chroma -> Redis" in recovery
+    assert "完整 digest" in recovery

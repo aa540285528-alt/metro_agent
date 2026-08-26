@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 
+from metro_agent.storage_paths import configured_storage_path
+
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 # 云端Deepseek模型，
@@ -35,7 +37,9 @@ EMBEDDING_MODEL = HuggingFaceEmbeddings(
 )
 # 用户长期记忆配置
 BASE_DIR = Path(__file__).resolve().parent
-MEMORY_CHROMA_DB_DIR = BASE_DIR / "memory_chroma_db"
+MEMORY_CHROMA_DB_DIR = configured_storage_path(
+    "MEMORY_CHROMA_DB_DIR", BASE_DIR / "memory_chroma_db"
+)
 MEMORY_COLLECTION_NAME = "metro_user_memories_v1"
 MEMORY_EMBED_MODEL_PATH = "D:/models/bge-m3"
 MEMORY_SEARCH_LIMIT = 5 # 搜索限制
