@@ -19,7 +19,7 @@ deploy/operations/backup-all.sh /srv/metro-backups/pilot-20260826
 deploy/operations/restore-all.sh /srv/metro-backups/pilot-20260826
 ```
 
-脚本验证全部校验和后，按固定顺序 **MySQL -> PostgreSQL -> Chroma -> Redis** 恢复。Chroma 在卷内解压到临时目录，再执行原子目录切换；旧 `current` 保留为 `rollback.previous`。随后脚本用 `cmp` 强制比对两个 Alembic revision 和恢复前后的 owner-counts，启动应用并等待 `/api/ready`。任一 revision、owner-count 或 readiness 不一致都会非零退出；不要删除 `rollback.previous`，保持写流量关闭并查明差异。
+脚本验证全部校验和后，从备份中的 `metro-agent-image.txt` 读取并验证完整的小写 `@sha256:` digest，在执行任何 Compose 命令前导出为 `METRO_AGENT_IMAGE`，确保恢复全过程使用备份时记录的应用镜像。随后按固定顺序 **MySQL -> PostgreSQL -> Chroma -> Redis** 恢复。Chroma 在卷内解压到临时目录，再执行原子目录切换；旧 `current` 保留为 `rollback.previous`。脚本用 `cmp` 强制比对两个 Alembic revision 和恢复前后的 owner-counts，启动应用并等待 `/api/ready`。任一 revision、owner-count 或 readiness 不一致都会非零退出；不要删除 `rollback.previous`，保持写流量关闭并查明差异。
 
 恢复验收还必须抽查 MySQL admin/user 数量与状态、PostgreSQL `owner_id` 和 Trace `user_id`、长期记忆 metadata、跨用户不可见、知识检索和 Redis checkpoint。脚本比对的是精确计数，业务语义抽查由验收人记录。
 

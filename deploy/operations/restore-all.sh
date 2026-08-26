@@ -6,10 +6,18 @@ case "$BACKUP_DIR" in
   /*) ;;
   *) echo "备份目录必须是绝对路径" >&2; exit 2 ;;
 esac
-for required in metro_auth.sql metro_agent.dump chroma.tar.gz memory-chroma.tar.gz redis-dump.rdb SHA256SUMS alembic-current-postgres.txt alembic-current-mysql.txt owner-counts-before.txt; do
+for required in metro_auth.sql metro_agent.dump chroma.tar.gz memory-chroma.tar.gz redis-dump.rdb SHA256SUMS alembic-current-postgres.txt alembic-current-mysql.txt metro-agent-image.txt owner-counts-before.txt; do
   test -s "$BACKUP_DIR/$required" || { echo "缺少备份文件: $required" >&2; exit 2; }
 done
 (cd "$BACKUP_DIR" && sha256sum -c SHA256SUMS)
+
+METRO_AGENT_IMAGE=$(cat "$BACKUP_DIR/metro-agent-image.txt")
+if test "$(printf '%s' "$METRO_AGENT_IMAGE" | wc -l)" -ne 0 || \
+   ! printf '%s' "$METRO_AGENT_IMAGE" | grep -Eq '^[^[:space:]@]+@sha256:[0-9a-f]{64}$'; then
+  echo "备份中的 metro-agent-image.txt 必须是完整的小写 sha256 digest" >&2
+  exit 2
+fi
+export METRO_AGENT_IMAGE
 
 docker compose stop app
 docker compose up -d --wait mysql postgres

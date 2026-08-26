@@ -28,6 +28,6 @@ docker compose exec -T postgres psql -X -U metro_agent -d metro_agent \
   < deploy/operations/legacy-owner-apply.sql
 ```
 
-apply 在同一事务中锁定两张表，重新计算候选数，再通过两个 `UPDATE ... RETURNING` 取得精确影响数。候选数不等于 EXPECTED_COUNT、实际更新总数不一致、目标值不匹配 `auth:<数字 id>`、缺少备份引用或任何 SQL 错误时，脚本都会在 `COMMIT` 前回滚并非零退出。旧模板把 psql 变量放进 `DO` / `GET DIAGNOSTICS`，变量替换边界不可靠；当前脚本不依赖该写法。
+apply 在同一事务中锁定两张表，重新计算候选数，再通过两个 `UPDATE ... RETURNING` 取得精确影响数。候选数不等于 EXPECTED_COUNT、实际更新总数不一致、目标值不匹配 `auth:<数字 id>`、备份引用未定义或为空白、或任何 SQL 错误时，脚本都会在 `COMMIT` 前回滚并非零退出。旧模板把 psql 变量放进 `DO` / `GET DIAGNOSTICS`，变量替换边界不可靠；当前脚本不依赖该写法。
 
 完成后再次运行 preview，要求旧 owner 的 `candidate_count` 为 `0`，并核对目标 owner 增量、跨用户 `404`、Trace 查询和 Chroma 长期记忆元数据。影响数不一致时不要修改审批数来迁就现场；保持 `app` 停止，从备份恢复或由 DBA 查明新增写入来源。

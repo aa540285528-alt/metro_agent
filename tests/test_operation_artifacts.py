@@ -40,6 +40,8 @@ def test_legacy_owner_migration_has_rollback_preview_and_guarded_apply() -> None
 
     assert "EXPECTED_COUNT" in apply
     assert "BACKUP_REFERENCE" in apply
+    assert "btrim(:'BACKUP_REFERENCE') <> ''" in apply
+    assert "backup_reference_is_valid" in apply
     assert "LEGACY_OWNER' <> :'TARGET_OWNER" in apply
     assert "LOCK TABLE conversations, agent_traces" in apply
     assert "candidate_count" in apply
@@ -69,6 +71,7 @@ def test_coordinated_recovery_scripts_cover_all_stores_and_restore_in_order() ->
         "redis-cli SAVE",
         "alembic-current-postgres.txt",
         "alembic-current-mysql.txt",
+        "metro-agent-image.txt",
         "owner-counts-before.txt",
     ):
         assert expected in backup
@@ -78,6 +81,10 @@ def test_coordinated_recovery_scripts_cover_all_stores_and_restore_in_order() ->
     chroma = restore.index("RESTORE_STEP=Chroma")
     redis = restore.index("RESTORE_STEP=Redis")
     assert mysql < postgres < chroma < redis
+    assert "metro-agent-image.txt" in restore
+    assert "sha256sum -c SHA256SUMS" in restore
+    assert "@sha256:[0-9a-f]{64}" in restore
+    assert restore.index("export METRO_AGENT_IMAGE") < restore.index("docker compose")
     assert "docker compose up -d --wait mysql postgres" in restore
     assert "GRANT ALL PRIVILEGES ON metro_auth.* TO 'metro_auth'@'%'" in restore
     for expected in (
