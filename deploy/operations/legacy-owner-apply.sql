@@ -20,7 +20,7 @@
   \quit 2
 \endif
 
-SELECT btrim(:'BACKUP_REFERENCE') <> '' AS backup_reference_is_valid \gset
+SELECT :'BACKUP_REFERENCE' !~ '^[[:space:]]*$' AS backup_reference_is_valid \gset
 \if :backup_reference_is_valid
 \else
   \echo 'BACKUP_REFERENCE 不能为空或仅包含空白字符'

@@ -40,7 +40,7 @@ def test_legacy_owner_migration_has_rollback_preview_and_guarded_apply() -> None
 
     assert "EXPECTED_COUNT" in apply
     assert "BACKUP_REFERENCE" in apply
-    assert "btrim(:'BACKUP_REFERENCE') <> ''" in apply
+    assert ":'BACKUP_REFERENCE' !~ '^[[:space:]]*$'" in apply
     assert "backup_reference_is_valid" in apply
     assert "LEGACY_OWNER' <> :'TARGET_OWNER" in apply
     assert "LOCK TABLE conversations, agent_traces" in apply
