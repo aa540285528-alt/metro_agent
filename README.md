@@ -25,7 +25,7 @@ Metro Agent 是面向地铁通信运维场景的多 Agent 助手。本仓库包�
    python -c "import secrets; print(secrets.token_hex(32))"
    ```
 
-   将结果写入 `.env`。四项为空时 Compose 会直接拒绝启动，不存在可工作的 `CHANGE_ME` 回退。
+   将结果写入 `.env`。必填的密钥或路径缺失时 Compose 会直接拒绝启动，不存在可工作的 `CHANGE_ME` 回退。另将 `MODEL_DIR` 设置为宿主机模型根目录，该目录必须包含 `bge-m3/` 和 `bge-reranker/`；Compose 会把它只读挂载为容器内 `/models`。Windows 可填写 `D:/models`，Linux 可填写 `/srv/metro-agent/models`。
 
 3. 构建并启动：
 

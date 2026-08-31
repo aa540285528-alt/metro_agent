@@ -30,8 +30,9 @@ QWEN_BASE_URL = os.environ.get("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs
 WIREMOCK_BASE_URL = os.environ.get("WIREMOCK_BASE_URL", "http://localhost:8080")
 
 # langchain 的嵌入模型
+EMBEDDING_MODEL_PATH = os.environ.get("EMBEDDING_MODEL_PATH", "/models/bge-m3")
 EMBEDDING_MODEL = HuggingFaceEmbeddings(
-    model_name="D:/models/bge-m3",
+    model_name=EMBEDDING_MODEL_PATH,
     model_kwargs = {"device": "cpu"},
     encode_kwargs = {"normalize_embeddings": True}
 )
@@ -41,7 +42,7 @@ MEMORY_CHROMA_DB_DIR = configured_storage_path(
     "MEMORY_CHROMA_DB_DIR", BASE_DIR / "memory_chroma_db"
 )
 MEMORY_COLLECTION_NAME = "metro_user_memories_v1"
-MEMORY_EMBED_MODEL_PATH = "D:/models/bge-m3"
+MEMORY_EMBED_MODEL_PATH = EMBEDDING_MODEL_PATH
 MEMORY_SEARCH_LIMIT = 5 # 搜索限制
 MEMORY_DUPLICATE_THRESHOLD = 0.90 # 相似度阈值
 # langmem的上下文窗口配置

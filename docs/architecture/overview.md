@@ -42,6 +42,8 @@ FastAPI
 
 Compose 网络不发布 MySQL、PostgreSQL 或 Redis 端口。应用仅发布到宿主机回环地址；WireMock 仅在 `mock` profile 下启动，认证链路不依赖公网资源。
 
+短期会话检查点使用 LangGraph Redis checkpointer，依赖 Redis Search 的 `FT.*` 命令。Compose 固定使用内置 Search 能力的 Redis 8，并在健康检查中验证 `FT.INFO` 可用；普通 Redis 7 镜像不能替代。
+
 ## 可观测性与 Langfuse 边界
 
 PostgreSQL 本地业务 Trace 是会话、工具、RAG artifact 与验收记录的权威关联，不由 Langfuse 替换。未来接入 Langfuse 时，只将其作为外部 LLMOps 平面，用于 Prompt 版本、数据集、自动/人工评测和跨版本比较；必须先完成敏感字段脱敏、租户/项目隔离、数据保留期限、出口网络审批和不可用时降级。

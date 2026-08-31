@@ -17,6 +17,8 @@
 ## 部署与秘密
 
 - [ ] 全新环境执行 `docker compose up --build -d` 成功；数据库无宿主机端口，应用仅监听 `127.0.0.1:8000`。
+- [ ] `.env` 的 `MODEL_DIR` 指向包含 `bge-m3/`、`bge-reranker/` 的宿主机目录，应用容器仅以只读方式挂载 `/models`。
+- [ ] Redis 健康检查通过，且 `redis-cli COMMAND INFO FT.INFO` 返回命令信息；不得使用缺少 Search 能力的基础 Redis 7。
 - [ ] `db-migrate`、`auth-migrate` 均退出码 `0`，已记录两个 Alembic revision。
 - [ ] `/api/health` liveness 与 `/api/ready` readiness 均通过；readiness 已实际覆盖 PostgreSQL、MySQL、Redis。
 - [ ] CI 实际完成 Docker image build，并记录应用镜像 digest。

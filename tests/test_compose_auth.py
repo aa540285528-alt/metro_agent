@@ -131,8 +131,9 @@ def test_compose_enforces_verified_mysql_tls_without_exposing_private_key() -> N
         service = services[service_name]
         auth_url = service["environment"]["AUTH_DATABASE_URL"]
         assert "ssl_ca=" in auth_url
-        assert "ssl_verify_cert=true" in auth_url
-        assert "ssl_verify_identity=true" in auth_url
+        assert "ssl_check_hostname=true" in auth_url
+        assert "ssl_verify_cert" not in auth_url
+        assert "ssl_verify_identity" not in auth_url
         mounts = " ".join(service["volumes"])
         assert "mysql_ca" in mounts
         assert "mysql_server_certs" not in mounts
@@ -151,6 +152,22 @@ def test_compose_supports_full_image_reference_for_digest_rollback() -> None:
         assert services[service_name]["image"] == (
             "${METRO_AGENT_IMAGE:-metro-agent:local}"
         )
+
+
+def test_app_mounts_local_models_read_only() -> None:
+    app = _compose()["services"]["app"]
+
+    assert app["environment"]["EMBEDDING_MODEL_PATH"] == "/models/bge-m3"
+    assert app["environment"]["RERANK_MODEL_PATH"] == "/models/bge-reranker"
+    assert "${MODEL_DIR:?请在 .env 中设置 MODEL_DIR}:/models:ro" in app["volumes"]
+
+
+def test_redis_includes_search_capability_required_by_checkpointer() -> None:
+    redis_service = _compose()["services"]["redis"]
+    healthcheck = " ".join(redis_service["healthcheck"]["test"])
+
+    assert redis_service["image"] == "redis:8.4-alpine"
+    assert "COMMAND INFO FT.INFO" in healthcheck
 
 
 def test_compose_persists_redis_and_both_chroma_stores_for_recovery() -> None:

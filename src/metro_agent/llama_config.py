@@ -19,7 +19,7 @@ def init_llama_index_components():
     
     # 2. 设置 Embedding
     Settings.embed_model = HuggingFaceEmbedding(
-    model_name="D:/models/bge-m3",
+    model_name=os.getenv("EMBEDDING_MODEL_PATH", "/models/bge-m3"),
     device="cpu",
     embed_batch_size=32,
     normalize=True,
@@ -28,7 +28,7 @@ def init_llama_index_components():
     
     # 3. 构建 Reranker（不直接赋给 Settings，而是返回）
     reranker = SentenceTransformerRerank(
-        model="D:/models/bge-reranker",
+        model=os.getenv("RERANK_MODEL_PATH", "/models/bge-reranker"),
         top_n=3
     )
     
