@@ -7,5 +7,7 @@ RUN pip install --no-cache-dir \
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --retries 10 --timeout 120 "."
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
+RUN python -c 'import tiktoken; tiktoken.get_encoding("cl100k_base")'
 EXPOSE 8000
 CMD ["uvicorn", "metro_agent.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

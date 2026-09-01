@@ -49,6 +49,13 @@ def test_container_uses_cpu_torch_and_runtime_dependencies_only() -> None:
     assert '".[dev]"' not in dockerfile
 
 
+def test_container_preloads_tiktoken_encoding_for_offline_startup() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache" in dockerfile
+    assert 'tiktoken.get_encoding("cl100k_base")' in dockerfile
+
+
 def test_model_paths_are_container_configurable() -> None:
     config_source = (ROOT / "src/metro_agent/config.py").read_text(encoding="utf-8")
     llama_source = (ROOT / "src/metro_agent/llama_config.py").read_text(encoding="utf-8")
