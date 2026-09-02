@@ -1,5 +1,7 @@
 """Persistent pointer to the fully built knowledge index collection."""
 
+from metro_agent.knowledge.releases import read_release_pointer
+
 PUBLISHED_INDEX_ID = "published"
 
 
@@ -8,6 +10,12 @@ class KnowledgeIndexUnavailableError(RuntimeError):
 
 
 def read_published_collection_name(client, registry_name: str) -> str:
+    # New publications use a descriptor-bound, atomic pointer.  Retain the
+    # legacy record shape only so historical registries remain readable until
+    # they are replaced by their next governed publication.
+    pointer = read_release_pointer(client, required=False)
+    if pointer is not None:
+        return pointer.current_collection_name
     try:
         registry = client.get_collection(registry_name)
     except Exception as exc:
@@ -27,6 +35,11 @@ def read_published_collection_name(client, registry_name: str) -> str:
 
 
 def publish_collection_name(client, registry_name: str, collection_name: str) -> None:
+    """Compatibility writer for pre-governance callers.
+
+    The governed indexer publishes through ``publish_validated_release`` so a
+    collection can never become visible without its artifact digest.
+    """
     registry = client.get_or_create_collection(registry_name)
     registry.upsert(
         ids=[PUBLISHED_INDEX_ID],

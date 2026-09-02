@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-import chromadb
 from llama_index.core import StorageContext, VectorStoreIndex
 from llama_index.core.node_parser import MarkdownNodeParser
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
+from metro_agent.knowledge.chroma_client import get_chroma_client
 from metro_agent.knowledge.config import require_knowledge_source_root
 from metro_agent.tools.knowledge_index_registry import (
     KnowledgeIndexUnavailableError,
@@ -27,7 +27,6 @@ from metro_agent.tools.chunk_artifacts import (
 )
 from metro_agent.tools.obsidian_loader import load_obsidian_documents
 from metro_agent.llama_config import (
-    CHROMA_DB_DIR,
     COLLECTION_NAME,
     INDEX_REGISTRY_COLLECTION_NAME,
     KNOWLEDGE_PATH,
@@ -86,7 +85,7 @@ def build_index(
     client=None,
     artifact_root: Path | str = DEFAULT_ARTIFACT_ROOT,
 ) -> IndexBuildResult:
-    client = client or chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
+    client = client or get_chroma_client()
 
     previous_collection_name: str | None = None
     try:
@@ -247,7 +246,7 @@ def reconcile_publish_uncertain(
     """Reconcile a failed publication only after checking the live registry pointer."""
     if target not in {"rollback", "publish"}:
         raise ValueError("target must be 'rollback' or 'publish'")
-    client = client or chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
+    client = client or get_chroma_client()
     manifest = read_chunk_manifest(artifact_root, index_build_id)
     lifecycle = manifest.get("lifecycle")
     if not isinstance(lifecycle, dict) or lifecycle.get("status") != "publish_uncertain":
@@ -305,51 +304,19 @@ def _verify_registry_pointer_or_absent(client, expected_collection_name: str | N
         raise IndexBuildError("registry pointer did not match the recovered collection state")
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build the Obsidian knowledge index.")
-    parser.add_argument(
-        "--rebuild",
-        action="store_true",
-        help="Replace the currently published index after a new build completes.",
-    )
-    parser.add_argument(
-        "--reconcile-build",
-        help="Reconcile a publish_uncertain chunk manifest by build id.",
-    )
-    parser.add_argument(
-        "--reconcile-target",
-        choices=("rollback", "publish"),
-        default="rollback",
-        help="Converge the verified registry state to failed or published.",
-    )
-    return parser.parse_args()
+def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
+    """Compatibility import that exposes the governed command grammar only."""
+    from metro_agent.tools.knowledge_indexer import parse_args as governed_parse_args
+
+    return governed_parse_args(arguments)
 
 
 def main() -> int:
-    args = parse_args()
-    try:
-        if args.reconcile_build:
-            result = reconcile_publish_uncertain(
-                index_build_id=args.reconcile_build,
-                target=args.reconcile_target,
-            )
-            print(
-                "Index reconciliation complete: "
-                f"build={result.index_build_id}, status={result.status}, "
-                f"collection={result.collection_name or 'none'}"
-            )
-            return 0
-        result = build_index(rebuild=args.rebuild)
-    except IndexBuildError as exc:
-        print(f"Index build failed: {exc}")
-        return 1
+    # Keep the legacy module address operational while exposing no unsafe
+    # command surface: all process execution goes through the governed CLI.
+    from metro_agent.tools.knowledge_indexer import main as governed_main
 
-    print(
-        "Index published: "
-        f"collection={result.collection_name}, "
-        f"documents={result.document_count}, nodes={result.node_count}"
-    )
-    return 0
+    return governed_main()
 
 
 if __name__ == "__main__":
