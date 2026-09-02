@@ -35,21 +35,14 @@ def read_published_collection_name(client, registry_name: str) -> str:
 
 
 def publish_collection_name(client, registry_name: str, collection_name: str) -> None:
-    """Compatibility writer for pre-governance callers.
-
-    The governed indexer publishes through ``publish_validated_release`` so a
-    collection can never become visible without its artifact digest.
-    """
-    registry = client.get_or_create_collection(registry_name)
-    registry.upsert(
-        ids=[PUBLISHED_INDEX_ID],
-        documents=["published index"],
-        embeddings=[[0.0]],
-        metadatas=[{"collection_name": collection_name, "status": "ready"}],
+    """Reject obsolete direct publication without touching the registry."""
+    raise KnowledgeIndexUnavailableError(
+        "direct publication is disabled; use the governed knowledge_indexer CLI"
     )
 
 
 def clear_published_collection_name(client, registry_name: str) -> None:
-    """Remove the published pointer when a failed first publication is rolled back."""
-    registry = client.get_collection(registry_name)
-    registry.delete(ids=[PUBLISHED_INDEX_ID])
+    """Reject obsolete direct pointer deletion without touching the registry."""
+    raise KnowledgeIndexUnavailableError(
+        "direct pointer deletion is disabled; use the governed knowledge_indexer CLI"
+    )

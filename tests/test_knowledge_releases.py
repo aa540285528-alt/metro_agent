@@ -14,6 +14,11 @@ from metro_agent.knowledge.releases import (
     read_release_pointer,
     rollback_release_pointer,
 )
+from metro_agent.tools.knowledge_index_registry import (
+    KnowledgeIndexUnavailableError,
+    clear_published_collection_name,
+    publish_collection_name,
+)
 
 
 class _Collection:
@@ -121,3 +126,14 @@ def test_pointer_rejects_non_hex_artifact_digests() -> None:
 
     with pytest.raises(ReleaseValidationError, match="current_artifact_sha256"):
         read_release_pointer(client)
+
+
+def test_legacy_registry_mutators_refuse_to_bypass_governed_indexer() -> None:
+    client = _Client()
+
+    with pytest.raises(KnowledgeIndexUnavailableError, match="governed knowledge_indexer"):
+        publish_collection_name(client, "legacy-registry", "metro__build_legacy")
+    with pytest.raises(KnowledgeIndexUnavailableError, match="governed knowledge_indexer"):
+        clear_published_collection_name(client, "legacy-registry")
+
+    assert client.collection.upserts == []
