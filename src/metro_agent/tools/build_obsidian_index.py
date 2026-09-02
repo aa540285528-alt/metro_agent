@@ -9,12 +9,9 @@ from llama_index.core import StorageContext, VectorStoreIndex
 from llama_index.core.node_parser import MarkdownNodeParser
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
-from metro_agent.knowledge.chroma_client import get_chroma_client
 from metro_agent.knowledge.config import require_knowledge_source_root
 from metro_agent.tools.knowledge_index_registry import (
     KnowledgeIndexUnavailableError,
-    clear_published_collection_name,
-    publish_collection_name,
     read_published_collection_name,
 )
 from metro_agent.tools.chunk_artifacts import (
@@ -85,7 +82,9 @@ def build_index(
     client=None,
     artifact_root: Path | str = DEFAULT_ARTIFACT_ROOT,
 ) -> IndexBuildResult:
-    client = client or get_chroma_client()
+    raise IndexBuildError(
+        "legacy build_index cannot publish outside the governed knowledge_indexer CLI"
+    )
 
     previous_collection_name: str | None = None
     try:
@@ -123,7 +122,7 @@ def build_index(
         if written_count <= 0:
             raise IndexBuildError("temporary index is empty; index was not published")
         publish_attempted = True
-        publish_collection_name(
+        _legacy_registry_mutation_blocked(
             client,
             INDEX_REGISTRY_COLLECTION_NAME,
             collection_name,
@@ -180,13 +179,19 @@ def build_index(
 
 def _restore_registry_pointer(client, previous_collection_name: str | None) -> None:
     if previous_collection_name:
-        publish_collection_name(
+        _legacy_registry_mutation_blocked(
             client,
             INDEX_REGISTRY_COLLECTION_NAME,
             previous_collection_name,
         )
         return
-    clear_published_collection_name(client, INDEX_REGISTRY_COLLECTION_NAME)
+    _legacy_registry_mutation_blocked(client, INDEX_REGISTRY_COLLECTION_NAME)
+
+
+def _legacy_registry_mutation_blocked(*_args: object) -> None:
+    raise IndexBuildError(
+        "legacy registry mutation is disabled; use the governed knowledge_indexer CLI"
+    )
 
 
 def _registry_points_to(client, collection_name: str) -> bool:
@@ -243,10 +248,9 @@ def reconcile_publish_uncertain(
     artifact_root: Path | str = DEFAULT_ARTIFACT_ROOT,
     target: str = "rollback",
 ) -> IndexReconciliationResult:
-    """Reconcile a failed publication only after checking the live registry pointer."""
-    if target not in {"rollback", "publish"}:
-        raise ValueError("target must be 'rollback' or 'publish'")
-    client = client or get_chroma_client()
+    raise IndexBuildError(
+        "legacy reconciliation cannot publish outside the governed knowledge_indexer CLI"
+    )
     manifest = read_chunk_manifest(artifact_root, index_build_id)
     lifecycle = manifest.get("lifecycle")
     if not isinstance(lifecycle, dict) or lifecycle.get("status") != "publish_uncertain":

@@ -34,6 +34,11 @@ FORCE_REBUILD_REASONS = (
     "recovery",
 )
 PUBLICATION_LOCK_KEY = "knowledge:publication"
+CHUNKER_PROVENANCE = {
+    "parser": "MarkdownNodeParser",
+    "overlap_char_count": 0,
+    "overlap_strategy": "none",
+}
 
 
 class KnowledgeIndexerError(RuntimeError):
@@ -49,6 +54,7 @@ class OperationEvents:
         self._root = Path(artifact_root) / "operations"
         self._operator = operator_assertion
         self._host = host or platform.node()
+        self._contexts: dict[str, dict[str, Any]] = {}
 
     def started(
         self,
@@ -58,30 +64,76 @@ class OperationEvents:
         previous_build_id: str | None,
         source_revision: str | None,
         force_reason: str | None,
+        current_build_id: str | None = None,
     ) -> str:
         operation_id = str(uuid4())
-        self._write(
-            operation_id,
-            "started",
-            {
-                "operation": operation,
-                "build_id": build_id,
-                "previous_build_id": previous_build_id,
-                "source_revision": source_revision,
-                "force_reason": force_reason,
-            },
-        )
+        self._contexts[operation_id] = {
+            "operation": operation,
+            "build_id": build_id,
+            "current_build_id": current_build_id,
+            "previous_build_id": previous_build_id,
+            "source_revision": source_revision,
+            "force_reason": force_reason,
+            "error_category": None,
+        }
+        self._write(operation_id, "started", self._contexts[operation_id])
         return operation_id
 
-    def succeeded(self, operation_id: str, *, operation: str, build_id: str | None) -> None:
-        self._write(operation_id, "succeeded", {"operation": operation, "build_id": build_id})
+    def succeeded(
+        self,
+        operation_id: str,
+        *,
+        operation: str,
+        build_id: str | None,
+        current_build_id: str | None = None,
+        previous_build_id: str | None = None,
+    ) -> None:
+        self._write(
+            operation_id,
+            "succeeded",
+            self._terminal_context(
+                operation_id,
+                operation,
+                build_id,
+                current_build_id=current_build_id,
+                previous_build_id=previous_build_id,
+            ),
+        )
 
     def failed(self, operation_id: str, *, operation: str, build_id: str | None, error: Exception) -> None:
         self._write(
             operation_id,
             "failed",
-            {"operation": operation, "build_id": build_id, "error_type": type(error).__name__},
+            {
+                **self._terminal_context(operation_id, operation, build_id),
+                "error_category": type(error).__name__,
+            },
         )
+
+    def _terminal_context(
+        self,
+        operation_id: str,
+        operation: str,
+        build_id: str | None,
+        *,
+        current_build_id: str | None = None,
+        previous_build_id: str | None = None,
+    ) -> dict[str, Any]:
+        context = dict(self._contexts.get(operation_id, {}))
+        context.update({"operation": operation, "build_id": build_id})
+        if current_build_id is not None:
+            context["current_build_id"] = current_build_id
+        if previous_build_id is not None:
+            context["previous_build_id"] = previous_build_id
+        for field in (
+            "current_build_id",
+            "previous_build_id",
+            "source_revision",
+            "force_reason",
+            "error_category",
+        ):
+            context.setdefault(field, None)
+        return context
 
     def _write(self, operation_id: str, state: str, detail: Mapping[str, Any]) -> None:
         self._root.mkdir(parents=True, exist_ok=True)
@@ -122,13 +174,7 @@ class KnowledgeIndexer:
             return {"status": "no-op", "build_id": current_pointer.current_build_id if current_pointer else ""}
 
         events = OperationEvents(self.artifact_root, operator_assertion=operator_assertion)
-        operation_id = events.started(
-            operation="build-and-publish",
-            build_id=None,
-            previous_build_id=current_pointer.current_build_id if current_pointer else None,
-            source_revision=getattr(initial_source, "git_commit", None),
-            force_reason=force_reason,
-        )
+        operation_id: str | None = None
         build_id: str | None = None
         try:
             with PublicationLock(self.redis_client, PUBLICATION_LOCK_KEY) as publication_lock:
@@ -139,9 +185,15 @@ class KnowledgeIndexer:
                 current = self._current_release_descriptor()
                 current_pointer = read_release_pointer(self.client, required=False)
                 if force_reason is None and self._matches_current(current, source_sha, provenance):
-                    build_id = current_pointer.current_build_id if current_pointer else None
-                    events.succeeded(operation_id, operation="build-and-publish", build_id=build_id)
-                    return {"status": "no-op", "build_id": build_id or ""}
+                    return {"status": "no-op", "build_id": current_pointer.current_build_id if current_pointer else ""}
+                operation_id = events.started(
+                    operation="build-and-publish",
+                    build_id=None,
+                    current_build_id=current_pointer.current_build_id if current_pointer else None,
+                    previous_build_id=current_pointer.previous_build_id if current_pointer else None,
+                    source_revision=getattr(source, "git_commit", None),
+                    force_reason=force_reason,
+                )
                 build_id, collection_name = self._build_collection(source)
                 self._ensure_collection_nonempty(collection_name)
                 self._run_smoke_queries(source, collection_name)
@@ -158,10 +210,18 @@ class KnowledgeIndexer:
                 release = create_validated_release(self.artifact_root, descriptor)
                 publication_lock.assert_held()
                 publish_validated_release(self.client, release)
-            events.succeeded(operation_id, operation="build-and-publish", build_id=build_id)
+            assert operation_id is not None
+            events.succeeded(
+                operation_id,
+                operation="build-and-publish",
+                build_id=build_id,
+                current_build_id=build_id,
+                previous_build_id=current_pointer.current_build_id if current_pointer else None,
+            )
             return {"status": "published", "build_id": build_id}
         except Exception as exc:
-            events.failed(operation_id, operation="build-and-publish", build_id=build_id, error=exc)
+            if operation_id is not None:
+                events.failed(operation_id, operation="build-and-publish", build_id=build_id, error=exc)
             if isinstance(exc, KnowledgeIndexerError):
                 raise
             raise KnowledgeIndexerError("knowledge build-and-publish failed") from exc
@@ -186,6 +246,7 @@ class KnowledgeIndexer:
         operation_id = events.started(
             operation="rollback",
             build_id=before.current_build_id,
+            current_build_id=before.current_build_id,
             previous_build_id=before.previous_build_id,
             source_revision=None,
             force_reason=None,
@@ -193,7 +254,13 @@ class KnowledgeIndexer:
         try:
             with PublicationLock(self.redis_client, PUBLICATION_LOCK_KEY):
                 pointer = rollback_release_pointer(self.client, self.artifact_root)
-            events.succeeded(operation_id, operation="rollback", build_id=pointer.current_build_id)
+            events.succeeded(
+                operation_id,
+                operation="rollback",
+                build_id=pointer.current_build_id,
+                current_build_id=pointer.current_build_id,
+                previous_build_id=pointer.previous_build_id,
+            )
             return {"status": "rolled-back", "build_id": pointer.current_build_id}
         except Exception as exc:
             events.failed(operation_id, operation="rollback", build_id=before.current_build_id, error=exc)
@@ -209,13 +276,23 @@ class KnowledgeIndexer:
         return str(source.source_tree_sha256)
 
     @staticmethod
-    def _provenance() -> dict[str, str]:
+    def _provenance() -> dict[str, Any]:
+        try:
+            from importlib.metadata import version
+
+            chroma_client_version = version("chromadb")
+        except Exception:
+            chroma_client_version = "unknown"
         return {
             "indexer": "metro_agent.tools.knowledge_indexer",
             "python": platform.python_version(),
-            "embedding_model": os.getenv("EMBEDDING_MODEL_PATH", "/models/bge-m3"),
-            "reranker_model": os.getenv("RERANK_MODEL_PATH", "/models/bge-reranker"),
-            "chunker": "MarkdownNodeParser",
+            "image_version": os.getenv("METRO_AGENT_IMAGE", "unknown"),
+            "code_version": os.getenv("METRO_AGENT_CODE_VERSION", "unknown"),
+            "chroma_client_version": chroma_client_version,
+            "chroma_server_version": os.getenv("CHROMA_SERVER_VERSION", "unknown"),
+            "embedding_model_id": os.getenv("EMBEDDING_MODEL_PATH", "/models/bge-m3"),
+            "reranker_model_id": os.getenv("RERANK_MODEL_PATH", "/models/bge-reranker"),
+            "chunker_config": dict(CHUNKER_PROVENANCE),
         }
 
     def _current_release_descriptor(self) -> Mapping[str, Any] | None:

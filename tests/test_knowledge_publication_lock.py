@@ -61,3 +61,13 @@ def test_renew_and_release_fail_closed_when_token_cannot_be_compared() -> None:
 def test_lock_rejects_a_ttl_longer_than_fifteen_minutes() -> None:
     with pytest.raises(ValueError, match="900"):
         PublicationLock(_Redis(), "knowledge:publication", ttl_seconds=901)
+
+
+def test_synchronous_prepublication_renewal_rejects_a_lost_lease_race() -> None:
+    redis = _Redis()
+    lock = PublicationLock(redis, "knowledge:publication")
+    lock.acquire()
+    redis.values.clear()  # Lease expires after a successful earlier heartbeat.
+
+    with pytest.raises(PublicationLockError, match="renew"):
+        lock.assert_held()
