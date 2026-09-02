@@ -6,11 +6,20 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 
 INDEX_REGISTRY_COLLECTION_NAME = "Metro_Knowledge_Index_Registry_v1"
 PUBLISHED_INDEX_ID = "published"
+PROVENANCE_TEXT_FIELDS = (
+    "image_version",
+    "code_version",
+    "python_version",
+    "chroma_client_version",
+    "chroma_server_version",
+    "embedding_model_id",
+    "reranker_model_id",
+)
 
 
 class ReleaseValidationError(RuntimeError):
@@ -74,7 +83,14 @@ def read_validated_release(artifact_root: Path | str, build_id: str) -> Validate
 
 def publish_validated_release(client: Any, release: ValidatedRelease) -> ReleasePointer:
     """Atomically change visibility by upserting the one published record."""
-    current = read_release_pointer(client, required=False)
+    try:
+        registry = client.get_collection(INDEX_REGISTRY_COLLECTION_NAME)
+    except Exception:
+        try:
+            registry = client.get_or_create_collection(INDEX_REGISTRY_COLLECTION_NAME)
+        except Exception as exc:
+            raise ReleaseValidationError("published release pointer is unavailable") from exc
+    current = _read_pointer_from_registry(registry, required=False)
     pointer = ReleasePointer(
         current_build_id=release.build_id,
         current_collection_name=release.collection_name,
@@ -90,17 +106,28 @@ def publish_validated_release(client: Any, release: ValidatedRelease) -> Release
 def read_release_pointer(client: Any, *, required: bool = True) -> ReleasePointer | None:
     try:
         registry = client.get_collection(INDEX_REGISTRY_COLLECTION_NAME)
-        record = registry.get(ids=[PUBLISHED_INDEX_ID], include=["metadatas"])
-        metadatas = record.get("metadatas") or []
-        metadata = metadatas[0] if metadatas else None
     except Exception as exc:
-        if required:
-            raise ReleaseValidationError("published release pointer is unavailable") from exc
-        return None
-    if not isinstance(metadata, Mapping):
+        raise ReleaseValidationError("published release pointer is unavailable") from exc
+    return _read_pointer_from_registry(registry, required=required)
+
+
+def _read_pointer_from_registry(registry: Any, *, required: bool) -> ReleasePointer | None:
+    try:
+        record = registry.get(ids=[PUBLISHED_INDEX_ID], include=["metadatas"])
+    except Exception as exc:
+        raise ReleaseValidationError("published release pointer is unavailable") from exc
+    if not isinstance(record, Mapping):
+        raise ReleaseValidationError("published release pointer record is corrupt")
+    metadatas = record.get("metadatas")
+    if not isinstance(metadatas, list):
+        raise ReleaseValidationError("published release pointer record is corrupt")
+    if not metadatas:
         if required:
             raise ReleaseValidationError("published release pointer is unavailable")
         return None
+    metadata = metadatas[0]
+    if not isinstance(metadata, Mapping):
+        raise ReleaseValidationError("published release pointer record is corrupt")
     try:
         return ReleasePointer(
             current_build_id=_required_text(metadata, "current_build_id"),
@@ -111,12 +138,15 @@ def read_release_pointer(client: Any, *, required: bool = True) -> ReleasePointe
             previous_artifact_sha256=_optional_sha(metadata, "previous_artifact_sha256"),
         )
     except ReleaseValidationError:
-        if required:
-            raise
-        return None
+        raise
 
 
-def rollback_release_pointer(client: Any, artifact_root: Path | str) -> ReleasePointer:
+def rollback_release_pointer(
+    client: Any,
+    artifact_root: Path | str,
+    *,
+    before_publish: Callable[[], None] | None = None,
+) -> ReleasePointer:
     """Swap current and previous only when the previous artifact still validates."""
     pointer = read_release_pointer(client)
     assert pointer is not None
@@ -136,6 +166,8 @@ def rollback_release_pointer(client: Any, artifact_root: Path | str) -> ReleaseP
         previous_collection_name=pointer.current_collection_name,
         previous_artifact_sha256=pointer.current_artifact_sha256,
     )
+    if before_publish is not None:
+        before_publish()
     _upsert_pointer(client, swapped)
     return swapped
 
@@ -176,6 +208,8 @@ def _validated_descriptor(descriptor: Mapping[str, Any]) -> dict[str, Any]:
     collection_name = result.get("collection_name")
     source_sha = result.get("source_tree_sha256")
     provenance = result.get("provenance")
+    source_revision = result.get("source_revision")
+    git_commit = result.get("git_commit")
     if not isinstance(build_id, str):
         raise ReleaseValidationError("index_build_id is required")
     _validate_build_id(build_id)
@@ -185,6 +219,17 @@ def _validated_descriptor(descriptor: Mapping[str, Any]) -> dict[str, Any]:
         raise ReleaseValidationError("source_tree_sha256 must be a SHA-256 digest")
     if not isinstance(provenance, Mapping):
         raise ReleaseValidationError("provenance must be an object")
+    for field in PROVENANCE_TEXT_FIELDS:
+        value = provenance.get(field)
+        if not isinstance(value, str) or not value:
+            raise ReleaseValidationError(f"provenance.{field} must be a non-empty string")
+    chunker_config = provenance.get("chunker_config")
+    if not isinstance(chunker_config, Mapping) or not chunker_config:
+        raise ReleaseValidationError("provenance.chunker_config must be a non-empty object")
+    if not isinstance(source_revision, str) or not source_revision:
+        raise ReleaseValidationError("source_revision must be a non-empty string")
+    if git_commit is not None and (not isinstance(git_commit, str) or not git_commit):
+        raise ReleaseValidationError("git_commit must be a non-empty string when present")
     return result
 
 

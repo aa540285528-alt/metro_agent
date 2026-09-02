@@ -204,7 +204,8 @@ class KnowledgeIndexer:
                     "index_build_id": build_id,
                     "collection_name": collection_name,
                     "source_tree_sha256": source_sha,
-                    "source_revision": getattr(source, "git_commit", None),
+                    "source_revision": source_sha,
+                    "git_commit": getattr(source, "git_commit", None),
                     "provenance": provenance,
                 }
                 release = create_validated_release(self.artifact_root, descriptor)
@@ -240,20 +241,27 @@ class KnowledgeIndexer:
         return {"status": "verified", "build_id": pointer.current_build_id}
 
     def rollback(self, *, operator_assertion: str) -> dict[str, str]:
-        before = read_release_pointer(self.client)
-        assert before is not None
         events = OperationEvents(self.artifact_root, operator_assertion=operator_assertion)
-        operation_id = events.started(
-            operation="rollback",
-            build_id=before.current_build_id,
-            current_build_id=before.current_build_id,
-            previous_build_id=before.previous_build_id,
-            source_revision=None,
-            force_reason=None,
-        )
+        before = None
+        operation_id: str | None = None
         try:
-            with PublicationLock(self.redis_client, PUBLICATION_LOCK_KEY):
-                pointer = rollback_release_pointer(self.client, self.artifact_root)
+            with PublicationLock(self.redis_client, PUBLICATION_LOCK_KEY) as publication_lock:
+                before = read_release_pointer(self.client)
+                assert before is not None
+                operation_id = events.started(
+                    operation="rollback",
+                    build_id=before.current_build_id,
+                    current_build_id=before.current_build_id,
+                    previous_build_id=before.previous_build_id,
+                    source_revision=None,
+                    force_reason=None,
+                )
+                pointer = rollback_release_pointer(
+                    self.client,
+                    self.artifact_root,
+                    before_publish=publication_lock.assert_held,
+                )
+            assert operation_id is not None
             events.succeeded(
                 operation_id,
                 operation="rollback",
@@ -263,7 +271,13 @@ class KnowledgeIndexer:
             )
             return {"status": "rolled-back", "build_id": pointer.current_build_id}
         except Exception as exc:
-            events.failed(operation_id, operation="rollback", build_id=before.current_build_id, error=exc)
+            if operation_id is not None:
+                events.failed(
+                    operation_id,
+                    operation="rollback",
+                    build_id=before.current_build_id if before else None,
+                    error=exc,
+                )
             if isinstance(exc, KnowledgeIndexerError):
                 raise
             raise KnowledgeIndexerError("knowledge rollback failed") from exc
@@ -285,7 +299,7 @@ class KnowledgeIndexer:
             chroma_client_version = "unknown"
         return {
             "indexer": "metro_agent.tools.knowledge_indexer",
-            "python": platform.python_version(),
+            "python_version": platform.python_version(),
             "image_version": os.getenv("METRO_AGENT_IMAGE", "unknown"),
             "code_version": os.getenv("METRO_AGENT_CODE_VERSION", "unknown"),
             "chroma_client_version": chroma_client_version,

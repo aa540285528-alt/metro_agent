@@ -157,6 +157,61 @@ class _Lock:
         pass
 
 
+class _RollbackPointer:
+    current_build_id = "old-current"
+    previous_build_id = "rollback-target"
+
+
+def test_rollback_acquires_lock_before_reading_pointer_or_writing_started_event(monkeypatch, tmp_path: Path) -> None:
+    trace: list[str] = []
+
+    class Lock:
+        def __init__(self, *_: object) -> None:
+            pass
+
+        def __enter__(self) -> Lock:
+            trace.append("acquire")
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            trace.append("release")
+
+        def assert_held(self) -> None:
+            trace.append("assert")
+
+    class Events:
+        def __init__(self, *_: object, **__: object) -> None:
+            pass
+
+        def started(self, **_: object) -> str:
+            trace.append("started")
+            return "operation-id"
+
+        def succeeded(self, *_: object, **__: object) -> None:
+            trace.append("succeeded")
+
+        def failed(self, *_: object, **__: object) -> None:
+            trace.append("failed")
+
+    def read_pointer(*_: object, **__: object) -> _RollbackPointer:
+        trace.append("read")
+        return _RollbackPointer()
+
+    def rollback(*_: object, before_publish: object, **__: object) -> _RollbackPointer:
+        trace.append("rollback")
+        before_publish()
+        return _RollbackPointer()
+
+    indexer = KnowledgeIndexer(client=object(), artifact_root=tmp_path, redis_client=object())
+    monkeypatch.setattr("metro_agent.tools.knowledge_indexer.PublicationLock", Lock)
+    monkeypatch.setattr("metro_agent.tools.knowledge_indexer.OperationEvents", Events)
+    monkeypatch.setattr("metro_agent.tools.knowledge_indexer.read_release_pointer", read_pointer)
+    monkeypatch.setattr("metro_agent.tools.knowledge_indexer.rollback_release_pointer", rollback)
+
+    assert indexer.rollback(operator_assertion="alice") == {"status": "rolled-back", "build_id": "old-current"}
+    assert trace == ["acquire", "read", "started", "rollback", "assert", "release", "succeeded"]
+
+
 def test_recheck_after_lock_returns_noop_before_creating_operation_events(monkeypatch, tmp_path: Path) -> None:
     indexer = KnowledgeIndexer(client=object(), artifact_root=tmp_path, redis_client=object())
     monkeypatch.setattr(indexer, "_validated_source", lambda: object())

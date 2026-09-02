@@ -14,6 +14,7 @@ from metro_agent.knowledge.releases import (
     read_release_pointer,
     rollback_release_pointer,
 )
+from metro_agent.knowledge.publication_lock import PublicationLockError
 from metro_agent.tools.knowledge_index_registry import (
     KnowledgeIndexUnavailableError,
     clear_published_collection_name,
@@ -53,7 +54,17 @@ def _descriptor(build_id: str) -> dict[str, object]:
         "index_build_id": build_id,
         "collection_name": f"metro__build_{build_id}",
         "source_tree_sha256": "a" * 64,
-        "provenance": {"code_version": "test", "chunker": "markdown"},
+        "source_revision": "a" * 64,
+        "provenance": {
+            "image_version": "image",
+            "code_version": "test",
+            "python_version": "3.12",
+            "chroma_client_version": "1.5.9",
+            "chroma_server_version": "1.5.9",
+            "embedding_model_id": "embedding",
+            "reranker_model_id": "reranker",
+            "chunker_config": {"parser": "markdown"},
+        },
     }
 
 
@@ -137,3 +148,56 @@ def test_legacy_registry_mutators_refuse_to_bypass_governed_indexer() -> None:
         clear_published_collection_name(client, "legacy-registry")
 
     assert client.collection.upserts == []
+
+
+def test_read_pointer_returns_none_only_for_an_absent_record() -> None:
+    client = _Client()
+    assert read_release_pointer(client, required=False) is None
+
+    client.collection.record = {"current_build_id": "malformed"}
+    with pytest.raises(ReleaseValidationError, match="current_collection_name"):
+        read_release_pointer(client, required=False)
+
+
+def test_publish_fails_closed_when_registry_is_unavailable(tmp_path: Path) -> None:
+    release = create_validated_release(tmp_path, _descriptor("first"))
+
+    with pytest.raises(ReleaseValidationError, match="pointer is unavailable"):
+        publish_validated_release(object(), release)
+
+
+def test_publish_creates_only_a_truly_absent_registry_before_first_pointer(tmp_path: Path) -> None:
+    class MissingRegistryClient(_Client):
+        def get_collection(self, _: str) -> _Collection:
+            raise RuntimeError("collection does not exist")
+
+    client = MissingRegistryClient()
+    release = create_validated_release(tmp_path, _descriptor("first"))
+
+    pointer = publish_validated_release(client, release)
+
+    assert pointer.current_build_id == "first"
+    assert len(client.collection.upserts) == 1
+
+
+def test_validated_descriptor_requires_complete_typed_provenance(tmp_path: Path) -> None:
+    descriptor = _descriptor("first")
+    descriptor["provenance"] = {"code_version": "only-one-field"}
+
+    with pytest.raises(ReleaseValidationError, match="image_version"):
+        create_validated_release(tmp_path, descriptor)
+
+
+def test_rollback_does_not_upsert_after_a_prepublication_lease_loss(tmp_path: Path) -> None:
+    client = _Client()
+    first = create_validated_release(tmp_path, _descriptor("first"))
+    second = create_validated_release(tmp_path, _descriptor("second"))
+    publish_validated_release(client, first)
+    publish_validated_release(client, second)
+
+    def lose_lease() -> None:
+        raise PublicationLockError("publication lock renew lost ownership")
+
+    with pytest.raises(PublicationLockError, match="renew"):
+        rollback_release_pointer(client, tmp_path, before_publish=lose_lease)
+    assert len(client.collection.upserts) == 2
