@@ -82,7 +82,7 @@ def validate_knowledge_source_root(source_root: Path | None) -> Path:
     if source_root is None:
         raise KnowledgeSourceValidationError("KNOWLEDGE_PATH must be configured")
     root = source_root.absolute()
-    _reject_link_or_reparse(root)
+    _reject_link_or_reparse_ancestors(root)
     if not root.is_dir():
         raise KnowledgeSourceValidationError(
             f"KNOWLEDGE_PATH is not a directory: {root}"
@@ -120,13 +120,19 @@ def _discover_documents(root: Path, current_date: date) -> list[KnowledgeDocumen
 
 def _front_matter(path: Path) -> Mapping[str, Any]:
     text = path.read_text(encoding="utf-8")
-    if not text.startswith("---"):
-        raise KnowledgeSourceValidationError(f"{path} has malformed YAML front matter")
-    end = text.find("\n---", 3)
-    if end == -1:
-        raise KnowledgeSourceValidationError(f"{path} has malformed YAML front matter")
+    lines = text.splitlines()
+    if not lines or lines[0] != "---":
+        raise KnowledgeSourceValidationError(
+            f"{path} has malformed YAML front matter delimiter"
+        )
     try:
-        metadata = yaml.safe_load(text[3:end])
+        closing_line = lines.index("---", 1)
+    except ValueError:
+        raise KnowledgeSourceValidationError(
+            f"{path} has malformed YAML front matter delimiter"
+        ) from None
+    try:
+        metadata = yaml.safe_load("\n".join(lines[1:closing_line]))
     except yaml.YAMLError as error:
         raise KnowledgeSourceValidationError(
             f"{path} has malformed YAML front matter"
@@ -198,6 +204,10 @@ def _read_jsonl(path: Path, source_paths: set[str]) -> list[SmokeQuery]:
                 f"smoke query line {line_number} has an invalid minimum_matches"
             )
         queries.append(SmokeQuery(query, expected_source, minimum_matches))
+    if not queries:
+        raise KnowledgeSourceValidationError(
+            "release-smoke-queries.jsonl must contain at least one query"
+        )
     return queries
 
 
@@ -250,6 +260,11 @@ def _reject_link_or_reparse(path: Path) -> None:
         raise KnowledgeSourceValidationError(
             f"symbolic link or reparse point is not allowed: {path}"
         )
+
+
+def _reject_link_or_reparse_ancestors(path: Path) -> None:
+    for ancestor in (path, *path.parents):
+        _reject_link_or_reparse(ancestor)
 
 
 def _is_reparse_point(path: Path) -> bool:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import date
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pytest
 
 from metro_agent.knowledge.source_validation import (
     KnowledgeSourceValidationError,
+    clean_git_commit,
     validate_source_root,
 )
 
@@ -215,6 +217,60 @@ def test_rejects_malformed_or_non_object_smoke_jsonl(
         validate_source_root(tmp_path)
 
 
+def test_rejects_an_empty_release_smoke_file(tmp_path: Path) -> None:
+    _write_document(tmp_path)
+    (tmp_path / "release-smoke-queries.jsonl").write_text("", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="at least one"):
+        validate_source_root(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "front_matter",
+    [
+        "--- \nowner: operations\nsource: handbook\nupdated: 2026-08-31\neffective_date: 2026-08-31\nexpires_at: 2026-12-31\nrisk_level: general\n---\n",
+        "----\nowner: operations\nsource: handbook\nupdated: 2026-08-31\neffective_date: 2026-08-31\nexpires_at: 2026-12-31\nrisk_level: general\n---\n",
+        "---\nowner: operations\nsource: handbook\nupdated: 2026-08-31\neffective_date: 2026-08-31\nexpires_at: 2026-12-31\nrisk_level: general\n----\n",
+    ],
+)
+def test_requires_exact_yaml_front_matter_delimiter_lines(
+    tmp_path: Path, front_matter: str
+) -> None:
+    (tmp_path / "source.md").write_text(front_matter, encoding="utf-8")
+    _write_smoke(tmp_path, "source.md")
+
+    with pytest.raises(ValueError, match="delimiter"):
+        validate_source_root(tmp_path)
+
+
+def test_rejects_symbolic_link_in_a_configured_root_ancestor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_root = tmp_path / "knowledge"
+    _write_document(source_root)
+    _write_smoke(source_root)
+    monkeypatch.setattr(Path, "is_symlink", lambda path: path == tmp_path)
+
+    with pytest.raises(ValueError, match="symbolic link"):
+        validate_source_root(source_root)
+
+
+def test_rejects_reparse_point_in_a_configured_root_ancestor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_root = tmp_path / "knowledge"
+    _write_document(source_root)
+    _write_smoke(source_root)
+    import metro_agent.knowledge.source_validation as source_validation
+
+    monkeypatch.setattr(
+        source_validation, "_is_reparse_point", lambda path: path == tmp_path
+    )
+
+    with pytest.raises(ValueError, match="reparse point"):
+        validate_source_root(source_root)
+
+
 def test_rejects_symlinked_markdown_sources(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -296,3 +352,59 @@ def test_source_hash_changes_for_source_or_smoke_content(tmp_path: Path) -> None
     changed_smoke = validate_source_root(tmp_path).source_tree_sha256
 
     assert original != changed_document != changed_smoke
+
+
+def test_source_hash_is_deterministic_across_document_creation_order(
+    tmp_path: Path,
+) -> None:
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    _write_document(first_root, "a.md")
+    _write_document(first_root, "nested/b.md")
+    _write_smoke(first_root, "a.md")
+    _write_document(second_root, "nested/b.md")
+    _write_document(second_root, "a.md")
+    _write_smoke(second_root, "a.md")
+
+    assert (
+        validate_source_root(first_root).source_tree_sha256
+        == validate_source_root(second_root).source_tree_sha256
+    )
+
+
+def test_clean_git_commit_returns_head_only_for_clean_worktrees(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import metro_agent.knowledge.source_validation as source_validation
+
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        if command[-2:] == ["status", "--porcelain"]:
+            return subprocess.CompletedProcess(command, 0, stdout="")
+        return subprocess.CompletedProcess(command, 0, stdout="deadbeef\n")
+
+    monkeypatch.setattr(source_validation.subprocess, "run", fake_run)
+
+    assert clean_git_commit(tmp_path) == "deadbeef"
+    assert calls == [
+        ["git", "-C", str(tmp_path), "status", "--porcelain"],
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+    ]
+
+
+def test_clean_git_commit_omits_dirty_worktree(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import metro_agent.knowledge.source_validation as source_validation
+
+    monkeypatch.setattr(
+        source_validation.subprocess,
+        "run",
+        lambda command, **_: subprocess.CompletedProcess(
+            command, 0, stdout=" M source.md\n"
+        ),
+    )
+
+    assert clean_git_commit(tmp_path) is None
