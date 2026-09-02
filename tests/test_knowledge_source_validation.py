@@ -200,6 +200,34 @@ def test_read_errors_are_normalized_to_a_relative_validation_error(
     assert str(tmp_path) not in str(error.value)
 
 
+def test_invalid_utf8_markdown_is_a_relative_validation_error(tmp_path: Path) -> None:
+    _write_document(tmp_path, "guides/invalid.md")
+    _write_smoke(tmp_path, "guides/invalid.md")
+    document = tmp_path / "guides/invalid.md"
+    document.write_bytes(document.read_bytes() + b"\xff")
+
+    with pytest.raises(KnowledgeSourceValidationError) as error:
+        validate_source_root(tmp_path)
+
+    assert "guides/invalid.md" in str(error.value)
+    assert str(tmp_path) not in str(error.value)
+
+
+def test_invalid_utf8_smoke_file_is_a_relative_validation_error(
+    tmp_path: Path,
+) -> None:
+    _write_document(tmp_path)
+    _write_smoke(tmp_path)
+    smoke_path = tmp_path / "release-smoke-queries.jsonl"
+    smoke_path.write_bytes(smoke_path.read_bytes() + b"\xff")
+
+    with pytest.raises(KnowledgeSourceValidationError) as error:
+        validate_source_root(tmp_path)
+
+    assert "release-smoke-queries.jsonl" in str(error.value)
+    assert str(tmp_path) not in str(error.value)
+
+
 def test_stat_errors_are_normalized_to_a_relative_validation_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

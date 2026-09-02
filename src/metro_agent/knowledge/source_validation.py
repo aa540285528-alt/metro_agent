@@ -125,7 +125,10 @@ def _discover_documents(root: Path, current_date: date) -> list[KnowledgeDocumen
 
 
 def _front_matter(path: Path, relative_path: str) -> Mapping[str, Any]:
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise _validation_error(relative_path, "is not valid UTF-8") from error
     lines = text.splitlines()
     if not lines or lines[0] != "---":
         raise KnowledgeSourceValidationError(
@@ -185,9 +188,11 @@ def _validate_metadata(
 
 def _read_jsonl(path: Path, source_paths: set[str]) -> list[SmokeQuery]:
     queries: list[SmokeQuery] = []
-    for line_number, line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(), start=1
-    ):
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except UnicodeDecodeError as error:
+        raise _validation_error(SMOKE_QUERY_FILE, "is not valid UTF-8") from error
+    for line_number, line in enumerate(lines, start=1):
         try:
             item = json.loads(line)
         except json.JSONDecodeError as error:
