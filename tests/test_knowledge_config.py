@@ -98,3 +98,20 @@ def test_client_factory_connects_through_configured_http_endpoint(monkeypatch) -
 
     assert client is not None
     assert calls == [("knowledge-read-proxy", 8000)]
+
+
+def test_indexing_rejects_an_unset_knowledge_path() -> None:
+    from metro_agent.knowledge.config import require_knowledge_source_root
+
+    with pytest.raises(ValueError, match="KNOWLEDGE_PATH"):
+        require_knowledge_source_root(None)
+
+
+def test_indexer_validates_knowledge_path_before_loading_documents() -> None:
+    indexer_source = (
+        ROOT / "src" / "metro_agent" / "tools" / "build_obsidian_index.py"
+    ).read_text(encoding="utf-8")
+
+    assert "load_obsidian_documents(require_knowledge_source_root(KNOWLEDGE_PATH))" in (
+        indexer_source
+    )

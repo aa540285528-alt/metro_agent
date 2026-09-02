@@ -10,6 +10,7 @@ from llama_index.core import StorageContext, VectorStoreIndex
 from llama_index.core.node_parser import MarkdownNodeParser
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
+from metro_agent.knowledge.config import require_knowledge_source_root
 from metro_agent.tools.knowledge_index_registry import (
     KnowledgeIndexUnavailableError,
     clear_published_collection_name,
@@ -62,7 +63,7 @@ class IndexReconciliationResult:
 
 
 def build_nodes():
-    documents = load_obsidian_documents(KNOWLEDGE_PATH)
+    documents = load_obsidian_documents(require_knowledge_source_root(KNOWLEDGE_PATH))
     nodes = MarkdownNodeParser().get_nodes_from_documents(documents)
     return documents, nodes
 

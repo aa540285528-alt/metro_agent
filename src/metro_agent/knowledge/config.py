@@ -33,3 +33,10 @@ class KnowledgeSettings:
 def _optional_path(variable: str) -> Path | None:
     value = os.getenv(variable)
     return Path(value) if value else None
+
+
+def require_knowledge_source_root(source_root: Path | None) -> Path:
+    """Return a configured source root or reject an indexing attempt early."""
+    if source_root is None:
+        raise ValueError("KNOWLEDGE_PATH must be configured before indexing")
+    return source_root
