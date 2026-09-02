@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from chromadb.errors import NotFoundError
 
 from metro_agent.tools.knowledge_indexer import (
     FORCE_REBUILD_REASONS,
@@ -141,6 +142,54 @@ def test_build_noops_when_source_and_provenance_match_current(monkeypatch, tmp_p
     )
 
     assert indexer.build_and_publish(operator_assertion="alice") == {"status": "no-op", "build_id": "current"}
+
+
+def test_fresh_deployment_build_creates_the_missing_registry_and_publishes(monkeypatch, tmp_path: Path) -> None:
+    class Registry:
+        def __init__(self) -> None:
+            self.upserts: list[dict[str, object]] = []
+
+        def get(self, **_: object) -> dict[str, object]:
+            return {"metadatas": []}
+
+        def upsert(self, **kwargs: object) -> None:
+            self.upserts.append(kwargs)
+
+    class FreshClient:
+        def __init__(self) -> None:
+            self.registry = Registry()
+
+        def get_collection(self, _: str) -> Registry:
+            raise NotFoundError("Collection Metro_Knowledge_Index_Registry_v1 does not exist")
+
+        def get_or_create_collection(self, _: str) -> Registry:
+            return self.registry
+
+    class Source:
+        git_commit = None
+
+    client = FreshClient()
+    indexer = KnowledgeIndexer(client=client, artifact_root=tmp_path, redis_client=object())
+    monkeypatch.setattr(indexer, "_validated_source", lambda: Source())
+    monkeypatch.setattr(indexer, "_source_sha", lambda _source: "a" * 64)
+    monkeypatch.setattr(indexer, "_build_collection", lambda _source: ("first", "metro__build_first"))
+    monkeypatch.setattr(indexer, "_ensure_collection_nonempty", lambda _name: None)
+    monkeypatch.setattr(indexer, "_run_smoke_queries", lambda _source, _name: None)
+    monkeypatch.setattr("metro_agent.tools.knowledge_indexer.PublicationLock", _Lock)
+
+    assert indexer.build_and_publish(operator_assertion="alice") == {"status": "published", "build_id": "first"}
+    assert len(client.registry.upserts) == 1
+
+
+def test_current_release_descriptor_rejects_unavailable_registry() -> None:
+    class UnavailableClient:
+        def get_collection(self, _: str) -> object:
+            raise RuntimeError("service unavailable")
+
+    indexer = KnowledgeIndexer(client=UnavailableClient(), artifact_root="artifacts", redis_client=object())
+
+    with pytest.raises(Exception, match="pointer is unavailable"):
+        indexer._current_release_descriptor()
 
 
 class _Lock:

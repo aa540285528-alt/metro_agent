@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from chromadb.errors import NotFoundError
 
 from metro_agent.knowledge.releases import (
     ReleasePointer,
@@ -169,7 +170,7 @@ def test_publish_fails_closed_when_registry_is_unavailable(tmp_path: Path) -> No
 def test_publish_creates_only_a_truly_absent_registry_before_first_pointer(tmp_path: Path) -> None:
     class MissingRegistryClient(_Client):
         def get_collection(self, _: str) -> _Collection:
-            raise RuntimeError("collection does not exist")
+            raise NotFoundError("Collection Metro_Knowledge_Index_Registry_v1 does not exist")
 
     client = MissingRegistryClient()
     release = create_validated_release(tmp_path, _descriptor("first"))
@@ -178,6 +179,19 @@ def test_publish_creates_only_a_truly_absent_registry_before_first_pointer(tmp_p
 
     assert pointer.current_build_id == "first"
     assert len(client.collection.upserts) == 1
+
+
+def test_publish_does_not_create_or_overwrite_after_an_unavailable_registry_error(tmp_path: Path) -> None:
+    class UnavailableRegistryClient(_Client):
+        def get_collection(self, _: str) -> _Collection:
+            raise RuntimeError("service unavailable")
+
+    client = UnavailableRegistryClient()
+    release = create_validated_release(tmp_path, _descriptor("first"))
+
+    with pytest.raises(ReleaseValidationError, match="pointer is unavailable"):
+        publish_validated_release(client, release)
+    assert client.collection.upserts == []
 
 
 def test_validated_descriptor_requires_complete_typed_provenance(tmp_path: Path) -> None:
