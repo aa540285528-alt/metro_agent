@@ -5,80 +5,94 @@
 
 ## 目标与边界
 
-将受控 Markdown 知识源、Chroma 知识索引和 chunk artifact 变成可持久化、可追溯、可回滚的部署资源。新服务器必须能完成“导入受控知识源 → 构建 → 发布 → 查询 → 重启 → 回滚”。每次回答继续返回已发布的 `index_build_id`、来源文档和检索 chunk。
+将受控 Markdown 知识源、知识索引和 chunk artifact 变成可持久化、可追溯、可回滚的部署资源。新服务器必须能完成“导入受控知识源 → 构建 → 发布 → 查询 → 重启 → 回滚”。每次知识回答必须返回已发布的 `index_build_id`、来源文档和检索 chunk。
 
-本项目不实现资料审核人、正式的 `draft`/`review`/`retired` 审批流、用户反馈界面或多组织权限；这些属于随后独立的“知识发布治理”子项目。这里的“发布”仅指管理员将通过技术校验的构建设为当前可查询版本。
+本项目不实现审核人、`draft`/`review`/`retired` 审批流、用户反馈页面、多组织与 SSO。这些属于后续“知识发布治理”子项目。本项目的“发布”仅指宿主机管理员将技术校验通过的构建设为唯一可查询版本。
 
-## 方案选择
+Docker 宿主机及 Docker daemon 管理员是受信任的部署管理员，可绕过容器网络和卷边界；本项目防护的是普通用户与 Web 应用路径，后者绝不能修改、读取未发布或读取历史知识版本。
 
-采用“不可变构建 + Chroma 发布指针”而不是覆盖索引目录：
-
-- 每次构建生成唯一 `index_build_id`、唯一 Chroma collection（现有 `__build_<id>` 命名）和不可变 artifact 目录 `chunks/<id>/`。
-- Chroma registry 中的 `published` 记录是唯一的当前版本权威。应用仅解析该记录及匹配的 `published` manifest，不扫描或查询未发布 collection。
-- registry 的单个 `published` 记录同时保存当前 `collection_name` 和 `previous_collection_name`。成功切换时先验证新 collection 和 manifest，再以一次 upsert 同时写入新当前版本和旧当前版本；回滚也以一次 upsert 交换二者。这样发布指针不会出现两个独立 registry 记录之间的中间状态。回滚不会删除 collection 或 artifact。
-- 失败、空索引、artifact 缺失、抽样检索失败或发布后指针校验失败时，旧 `published` 不变；现有 `publish_uncertain` 处理继续保留为人工受控恢复路径。
-
-不使用文件系统 `current` 软链接作为发布开关：在 Windows/Compose 环境中它不如 Chroma registry 可移植，且现有查询代码已经以 registry 为一致性边界。
-
-## 部署资源与配置
-
-新增并统一使用以下配置：
-
-| 配置 | 宿主机含义 | 容器内路径 | 访问方 |
-| --- | --- | --- | --- |
-| `KNOWLEDGE_PATH` | 受控 Markdown 知识源目录 | `/knowledge/source` | 仅 `knowledge-indexer`，只读 |
-| `CHROMA_DB_DIR` | Chroma 知识索引持久化卷 | `/var/lib/metro-agent/knowledge-chroma` | 应用只读；indexer 读写 |
-| `KNOWLEDGE_ARTIFACT_ROOT` | chunk manifest、JSONL、预览和发布记录卷 | `/var/lib/metro-agent/knowledge-artifacts` | 应用只读；indexer 读写 |
-
-Compose 新增两个命名卷：`knowledge_chroma_data` 与 `knowledge_artifact_data`。受控知识源使用 `.env` 所指向的宿主机目录绑定挂载，绝不复制进镜像或 Git。应用不挂载原始知识源；它只读挂载索引和 artifact 卷，因此运行中的 Web 进程没有构建、发布或删除生产知识数据的能力。
-
-`knowledge-indexer` 是一次性 Compose 服务，不暴露端口、不自动随 `app` 启动。管理员通过受控命令显式运行它；它与应用使用同一镜像，挂载知识源为只读、索引与 artifact 为读写。服务执行完成后退出，任何非零退出码都表示没有完成发布。
-
-## 构建、发布与回滚流程
+## 部署架构
 
 ```text
-管理员运行 knowledge-indexer
-  -> 读取 /knowledge/source
-  -> 生成 collection + chunks/<build-id>/ artifact（staged）
-  -> 校验元数据、非空索引、manifest 哈希和抽样检索
-  -> 一次 upsert 写入新 published 与 previous_published
-  -> 将 manifest 标记为 published
-  -> 应用的下一次查询解析新 published 指针
+宿主机管理员
+  -> admin wrapper (.ps1/.sh)
+  -> docker compose run knowledge-indexer
+       -> Redis publication lock
+       -> Chroma backend
+       -> source / artifact volumes
+
+app -> knowledge-read-proxy -> Chroma backend
+           (only published reads)       (no host port)
 ```
 
-发布前检查必须包括：知识源至少含一份可解析 Markdown；所有文档具备既有检索所需的来源标识；collection 节点数大于零；manifest 的 build ID 与 collection 绑定正确；指定的抽样查询至少返回一个带 `chunk_id` 和来源文件的结果。任一检查失败时，indexer 将新构建标记为失败并以非零退出，且不会切换 `published`。
+使用精确固定的 `chromadb==1.5.9` 客户端和 `chromadb/chroma:1.5.9` server 镜像；AMD64 部署与 CI 固定经验证的 manifest digest，其他平台固定其对应 digest，严禁使用 `latest`。任何版本升级都必须重跑持续查询、发布、重启、回滚与代理拒绝写入演练。
 
-发布后，indexer 重新读取 registry、collection 和 manifest 进行一致性确认。若确认失败，使用现有补偿逻辑恢复旧指针；若无法证明最终指向，保留 `publish_uncertain` 记录并拒绝应用读取该新版本。
+生产运行时完全禁止 `PersistentClient`。只有 `chroma` 服务挂载知识索引卷；`app` 与 `knowledge-indexer` 均使用 HTTP client。`chroma` 没有宿主机端口，仅处于内部 backend 网络。
 
-回滚命令只能选择 `previous_collection_name` 指向的版本，并在切换前验证 collection 非空、manifest 状态为 `published`、manifest build ID 与 collection 匹配。回滚成功后，原当前版本成为新的前一版本，从而允许一次受控前滚。首次发布不存在前一版本时，回滚命令明确失败，不清空可查询索引。
+`app` 只加入 read-proxy 网络，既不能解析也不能连接 Chroma。`knowledge-indexer` 只连接 Chroma backend 网络且不暴露端口。`knowledge-read-proxy` 连接 Chroma backend 网络，并以只读方式挂载 artifact 卷；它在转发前验证 registry 指针与当前 validated artifact 摘要。代理是最小 Python ASGI 服务，固定上游 Chroma 地址并显式白名单 Chroma 1.5.9 所需的 identity、tenant、database、registry/collection 读取、count、`get` 与 `query` 路由；它只允许 registry collection 与 registry 当前指针所指 collection。所有 create、add、update、upsert、delete、fork、reset、`search`、PUT 与 DELETE 路由返回 `403`。代理路由白名单与版本锁同步测试。
 
-## 应用查询行为
+## 配置与持久化资源
 
-`Knowledge_RAGtools` 继续通过 `resolve_published_collection_name` 读取 registry 并验证对应 manifest；其缓存键为 collection 名称，因此发布或回滚后的下一次查询会创建匹配版本的查询引擎。读取失败、指针与 manifest 不一致、collection 为空或 artifact 缺失时，返回既有受控“索引不可用”错误，不会退回到未发布 collection。
+| 配置 | 容器内路径或地址 | 使用方 |
+| --- | --- | --- |
+| `KNOWLEDGE_PATH` | indexer 的 `/knowledge/source` | indexer 只读 |
+| `CHROMA_HOST`/`CHROMA_PORT` | 内部 `chroma:8000` | proxy、indexer |
+| `CHROMA_DB_DIR` | chroma 的 `/chroma/chroma` | 仅 chroma 服务读写 |
+| `KNOWLEDGE_ARTIFACT_ROOT` | `/var/lib/metro-agent/knowledge-artifacts` | indexer 读写；read-proxy、操作/备份服务只读 |
 
-RAG 结果必须包含：`index_build_id`、每个结果的 `chunk_id`、`file_name` 和完整 metadata。运行演练脚本应将一次查询响应与发布 build ID 保存为验收证据，但不记录用户会话或模型密钥。
+Compose 新增 `knowledge_chroma_data` 和 `knowledge_artifact_data` 命名卷。知识源是 `.env` 指向的宿主机目录，只读挂载进 indexer，绝不复制进镜像或 Git。应用不挂载知识源、Chroma 卷或 artifact 卷。
 
-## 管理命令与操作证据
+`knowledge-indexer` 是不自动启动、无端口的一次性 Compose 服务，固定入口为 `python -m metro_agent.tools.knowledge_indexer`。其子命令只能是 `build-and-publish`、`status`、`rollback`、`verify`。PowerShell 与 POSIX 包装器只采集 OS 用户和主机名并调用该入口；所有路径和上游地址均来自受控环境，命令不接受任意路径或 URL 参数。
 
-提供独立的管理员命令入口，至少支持：
+## 知识源与预检
 
-- `build-and-publish`：构建、预检、发布并输出 build ID、collection、文档数和 chunk 数；
-- `status`：输出当前和前一已发布版本及它们的 manifest 路径；
-- `rollback`：恢复前一已发布版本并输出新当前版本；
-- `verify`：验证当前版本可由应用查询、重启后仍可查询，并打印检索来源与 chunk ID。
+仅递归索引真实、位于 `KNOWLEDGE_PATH` 内的 `.md` 文件；符号链接、junction 和其他 reparse point 一律拒绝。每份文档必须使用安全 YAML front matter，且为映射并包含：
 
-命令只接受固定选项，不接受任意宿主机路径；全部路径来自 Compose 环境变量。操作说明将列出全新部署、构建、发布、重启、回滚和备份前检查的逐步命令与预期输出。
+- `owner`、`source`：非空字符串；
+- `updated`、`effective_date`、`expires_at`：ISO `YYYY-MM-DD`；
+- `risk_level`：`general`、`controlled` 或 `high`。
 
-## 测试与验收
+有效期按部署的 `Asia/Shanghai` 日历日解释，文档在 `expires_at` 当日结束后失效；到期文档会拒绝整次发布。单文件最大 10 MiB，每次构建最多 10,000 份文档。任一解析或资源错误均拒绝整次发布、输出精确相对路径而不输出正文。
 
-测试先于实现，并覆盖下列契约：
+知识根目录必须有 `release-smoke-queries.jsonl`，其自身不入索引。每行包含 `query`、`expected_source` 和 `minimum_matches`；`expected_source` 是从知识根目录开始的精确 POSIX 相对路径。预检要求前 `minimum_matches` 项中至少一次命中该来源，且总结果数不低于 `minimum_matches`。
 
-1. 配置默认值和环境覆盖，以及 `.env.example` 的必填知识源变量；
-2. Compose 中 indexer 不公开端口、不自动启动，且应用对知识索引和 artifact 使用只读挂载；
-3. 构建成功会产生唯一 collection、`published` manifest 和可验证发布/前一版本指针；
-4. 元数据、空 collection、artifact 或抽样检索失败不会改变旧 `published`；
-5. 回滚只允许经过验证的上一版本，并使应用查询报告被恢复的 build ID；
-6. 重新初始化应用查询组件后仍从持久化卷读取同一已发布版本；
-7. 一个 Compose 集成演练以临时受控知识源完成构建、查询、重启、回滚，且不会依赖真实模型密钥。
+indexer 在构建开始和完成时计算 `source_tree_sha256`：按相对路径排序，对被索引的 Markdown 和 smoke-query 文件的内容摘要进行确定性哈希。两次不同即失败，确保不发布构建期间变化的混合知识源。若源目录是干净 Git 工作区，额外记录 commit ID。
 
-完成条件是离线单元/集成测试和 Ruff 均通过，并在受控 Compose 环境记录一次完整“构建 → 发布 → 查询 → 重启 → 回滚”演练。现有数据库、Redis、内存 Chroma 和认证迁移服务不在本项目中删除或改为公网暴露。
+## 构建、发布、回滚与审计
+
+每个构建都有唯一 `index_build_id`、唯一 `__build_<id>` Chroma collection 和不可变 artifact。artifact 在发布前一次性写成 `validated`，记录 source hash、可选 Git commit、镜像/代码版本、Python、Chroma client/server、嵌入与重排模型标识、chunker 配置、collection 名称与校验摘要。
+
+若 `source_tree_sha256` 和完整 provenance 与当前发布版本相同，默认成功 no-op，输出当前 build ID，不新增 collection 或操作事件。`--force-rebuild` 仅接受 `indexer-upgrade`、`embedding-model-change`、`reranker-model-change`、`chunker-change`、`recovery` 原因；理由缺失或不在枚举中即拒绝。
+
+构建、发布、回滚和一致性备份先取得 Redis 锁 `knowledge:publication`。锁使用随机 token 与心跳续租，最长 15 分钟；无法取得/续租锁或 Redis 不可用时，以非零退出且不改当前状态。
+
+Chroma registry 的单条 `published` 记录是唯一可见性开关，包含当前 collection、前一 collection 和当前 validated artifact 摘要。indexer 在写入该记录前验证非空 collection、artifact 摘要、source 元数据和全部 smoke 查询。单次 upsert 同时写入新当前与旧当前版本；read-proxy 只转发与 registry 摘要精确匹配的 validated artifact 对应版本。没有跨存储事务也不会产生可查询的中间版本。
+
+回滚仅允许经过验证的前一 collection。它以单条 registry upsert 交换当前与前一版本，并保留所有 collection 和 artifact。首次发布没有前一版本时回滚失败，绝不清空当前版本。构建永久保留，不自动清理。
+
+每次操作以 UUID 记录在 `KNOWLEDGE_ARTIFACT_ROOT/operations/`：开始时原子创建 `<id>.started.json`，结束时创建不可覆盖的 `<id>.succeeded.json` 或 `<id>.failed.json`。记录 `operator_assertion`、主机、UTC 时间、操作、当前/前一 build ID、source revision、强制原因和错误类别。`operator_assertion` 是宿主机声明的操作者，用于受控运维追踪，不是密码学不可抵赖身份；只有开始记录代表中断并需人工核验。
+
+## 查询、保护与降级
+
+read-proxy 对 Chroma 的连接超时为 2 秒、上游响应超时为 10 秒、请求体最大 1 MiB。它记录请求 ID、路由类别、允许/拒绝、状态码、耗时和上游错误类别，不记录查询正文、向量、chunk 文本、Cookie、认证头或完整 URL 参数。
+
+代理不可达、拒绝请求或响应无效时，知识问答不允许直连 Chroma；返回“已发布知识库暂不可用，请稍后重试”的受控结果并记录原因。应用仍可提供登录、历史和非知识能力，`/api/ready` 必须报告知识服务未就绪。每次知识查询先经 proxy 读取 published pointer；正在执行的请求可以完成旧版本查询，但单次请求不得混用版本。
+
+## 备份、恢复与验收
+
+扩展 `backup-all.sh` 与 `restore-all.sh`，将整个 `knowledge_chroma_data` 与 `knowledge_artifact_data` 作为不可拆分的知识发布单元。备份获得 publication lock、停止 app、确认 indexer 未运行并停止 Chroma 后归档两个根目录；恢复先验证摘要，再同时恢复两者，验证 registry 与 validated artifact 摘要匹配后，才启动 Chroma、read-proxy 与 app。任一失败均不启动 app。
+
+备份目录或目标由组织管理的静态加密存储保护，权限限于部署管理员；脚本只负责完整性、一致性和恢复验证，不保存加密密钥。首次上线与每次 Chroma 升级前都必须完成隔离恢复演练并记录加密控制和结果。
+
+测试先于实现，至少覆盖：
+
+1. 环境配置、固定 client/server 版本、网络与卷隔离；
+2. metadata、路径逃逸、有效期、大小/数量、source-tree 变化、重复与强制构建；
+3. 预检失败不改变 published 指针，发布/回滚的 registry-artifact 一致性；
+4. Redis 锁的并发拒绝、续租失败和操作事件终态；
+5. read-proxy 对所有读取白名单路径的成功，以及每个写路径的拒绝且无状态变化；
+6. 代理超时、脱敏日志和知识不可用时的 ready/degrade 行为；
+7. 备份/恢复同时还原 registry 与 artifact，并恢复到可查询版本；
+8. `knowledge-e2e` Compose profile 使用临时知识源与确定性测试嵌入器，覆盖构建、发布、持续查询、重启与回滚，不依赖真实模型密钥。
+
+确定性嵌入器仅可在 `KNOWLEDGE_E2E=1` 启用；默认 Compose 与生产 indexer 拒绝该变量，并有测试覆盖。实际部署验收使用批准模型目录的只读挂载，并记录一次完整演练。
