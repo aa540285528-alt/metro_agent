@@ -135,6 +135,136 @@ def test_rejects_unsupported_risk_level(tmp_path: Path) -> None:
         validate_source_root(tmp_path)
 
 
+@pytest.mark.parametrize(
+    "field, replacement",
+    [
+        ("owner", "owner: "),
+        ("owner", "owner: 42"),
+        ("source", "source: "),
+        ("source", "source: 42"),
+    ],
+)
+def test_rejects_empty_or_non_string_owner_and_source(
+    tmp_path: Path, field: str, replacement: str
+) -> None:
+    _write_document(tmp_path)
+    _write_smoke(tmp_path)
+    document = tmp_path / "guides/intro.md"
+    document.write_text(
+        document.read_text(encoding="utf-8").replace(
+            f"{field}: operations" if field == "owner" else f"{field}: handbook",
+            replacement,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(KnowledgeSourceValidationError, match=field):
+        validate_source_root(tmp_path)
+
+
+@pytest.mark.parametrize("risk_value", ["risk_level: 42", "risk_level: []"])
+def test_rejects_non_string_risk_level_as_a_validation_error(
+    tmp_path: Path, risk_value: str
+) -> None:
+    _write_document(tmp_path)
+    _write_smoke(tmp_path)
+    document = tmp_path / "guides/intro.md"
+    document.write_text(
+        document.read_text(encoding="utf-8").replace("risk_level: general", risk_value),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(KnowledgeSourceValidationError, match="risk_level"):
+        validate_source_root(tmp_path)
+
+
+def test_read_errors_are_normalized_to_a_relative_validation_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_document(tmp_path)
+    _write_smoke(tmp_path)
+    document = tmp_path / "guides/intro.md"
+    original_read_text = Path.read_text
+
+    def denied_read(path: Path, *args: object, **kwargs: object) -> str:
+        if path == document:
+            raise PermissionError(13, "denied", str(document))
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", denied_read)
+
+    with pytest.raises(KnowledgeSourceValidationError) as error:
+        validate_source_root(tmp_path)
+
+    assert "guides/intro.md" in str(error.value)
+    assert str(tmp_path) not in str(error.value)
+
+
+def test_stat_errors_are_normalized_to_a_relative_validation_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_document(tmp_path)
+    _write_smoke(tmp_path)
+    document = tmp_path / "guides/intro.md"
+    original_stat = Path.stat
+
+    def denied_stat(path: Path, *args: object, **kwargs: object) -> object:
+        if path == document:
+            raise PermissionError(13, "denied", str(document))
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", denied_stat)
+
+    with pytest.raises(KnowledgeSourceValidationError) as error:
+        validate_source_root(tmp_path)
+
+    assert "guides/intro.md" in str(error.value)
+    assert str(tmp_path) not in str(error.value)
+
+
+def test_walk_errors_are_normalized_to_a_relative_validation_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_document(tmp_path)
+    _write_smoke(tmp_path)
+    inaccessible = tmp_path / "private"
+    import metro_agent.knowledge.source_validation as source_validation
+
+    def broken_walk(
+        root: Path, *, onerror: object, followlinks: bool
+    ) -> list[tuple[str, list[str], list[str]]]:
+        assert followlinks is False
+        assert callable(onerror)
+        onerror(PermissionError(13, "denied", str(inaccessible)))
+        return []
+
+    monkeypatch.setattr(source_validation.os, "walk", broken_walk)
+
+    with pytest.raises(KnowledgeSourceValidationError) as error:
+        validate_source_root(tmp_path)
+
+    assert "private" in str(error.value)
+    assert str(tmp_path) not in str(error.value)
+
+
+def test_validation_errors_expose_only_relative_source_paths(tmp_path: Path) -> None:
+    _write_document(tmp_path)
+    _write_smoke(tmp_path)
+    document = tmp_path / "guides/intro.md"
+    document.write_text(
+        document.read_text(encoding="utf-8").replace(
+            "risk_level: general", "risk_level: secret"
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(KnowledgeSourceValidationError) as error:
+        validate_source_root(tmp_path)
+
+    assert "guides/intro.md" in str(error.value)
+    assert str(tmp_path) not in str(error.value)
+
+
 def test_rejects_an_expired_document_using_the_supplied_shanghai_date(
     tmp_path: Path,
 ) -> None:
