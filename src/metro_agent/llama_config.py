@@ -5,6 +5,7 @@ from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 import os
 from pathlib import Path
 
+from metro_agent.knowledge.config import KnowledgeSettings
 from metro_agent.storage_paths import configured_storage_path
 
 
@@ -65,4 +66,4 @@ BASE_DIR = Path(__file__).resolve().parent
 CHROMA_DB_DIR = configured_storage_path("CHROMA_DB_DIR", BASE_DIR / "chroma_db")
 COLLECTION_NAME = "Metro_Knowledge_Obsidian_v1"
 INDEX_REGISTRY_COLLECTION_NAME = "Metro_Knowledge_Index_Registry_v1"
-KNOWLEDGE_PATH="d:/AIknowledge/wiki"
+KNOWLEDGE_PATH = KnowledgeSettings.from_environment().source_root

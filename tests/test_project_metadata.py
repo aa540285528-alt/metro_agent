@@ -35,6 +35,12 @@ def test_langchain_dependencies_use_one_compatible_generation() -> None:
     } <= dependencies
 
 
+def test_knowledge_runtime_pins_chromadb() -> None:
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert "chromadb==1.5.9" in config["project"]["dependencies"]
+
+
 def test_container_uses_cpu_torch_and_runtime_dependencies_only() -> None:
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 
