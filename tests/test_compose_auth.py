@@ -238,5 +238,5 @@ def test_knowledge_admin_wrappers_only_accept_governed_commands() -> None:
         assert command in powershell
     assert "${USER" in shell
     assert "$env:USERNAME" in powershell
-    assert "METRO_AGENT_KNOWLEDGE_ADMIN" in shell
-    assert "METRO_AGENT_KNOWLEDGE_ADMIN" in powershell
+    assert "id -u" in shell
+    assert "WindowsPrincipal" in powershell
