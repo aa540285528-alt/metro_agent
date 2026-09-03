@@ -39,13 +39,15 @@ docker compose exec -T postgres \
   < "$BACKUP_DIR/metro_agent.dump"
 
 echo RESTORE_STEP=Chroma
-docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup:ro" app python -c \
-  "import os,shutil,tarfile; root='/var/lib/metro-agent/memory-chroma'; unpack=root+'/restore.unpack'; old=root+'/rollback.previous'; shutil.rmtree(unpack,ignore_errors=True); shutil.rmtree(old,ignore_errors=True); os.makedirs(unpack); a=tarfile.open('/backup/memory-chroma.tar.gz'); a.extractall(unpack,filter='data'); a.close(); os.replace(root+'/current',old) if os.path.exists(root+'/current') else None; os.replace(unpack+'/current',root+'/current'); shutil.rmtree(unpack,ignore_errors=True)"
-docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup:ro" chroma sh -ceu \
-  'tar -C /chroma -xzf /backup/knowledge-chroma.tar.gz'
+docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup:ro" app \
+  python deploy/operations/safe-restore-tar.py swap-volume /backup/memory-chroma.tar.gz /var/lib/metro-agent/memory-chroma --expected-root current
+# The full knowledge volume is staged and switched only after every tar member
+# has been inspected.  It is never extracted over the live Chroma root.
+docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup:ro" -v knowledge_chroma_data:/restore app \
+  python deploy/operations/safe-restore-tar.py replace-volume-contents /backup/knowledge-chroma.tar.gz /restore --expected-root chroma
 # Artifacts are append-only evidence.  Extraction never clears existing releases.
 docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup:ro" knowledge-indexer sh -ceu \
-  'tar -C /var/lib/metro-agent -xzf /backup/knowledge-artifacts.tar.gz'
+  'python deploy/operations/safe-restore-tar.py merge-artifacts /backup/knowledge-artifacts.tar.gz /var/lib/metro-agent --expected-root knowledge-artifacts'
 
 echo RESTORE_STEP=Redis
 docker compose stop redis
@@ -78,6 +80,14 @@ verify-restored-release() {
 }
 verify-restored-release
 
+docker compose up -d --wait knowledge-read-proxy
+attempt=0
+until docker compose exec -T knowledge-read-proxy python -c \
+  "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v2/heartbeat',timeout=3)"; do
+  attempt=$((attempt + 1))
+  test "$attempt" -lt 30 || { echo "knowledge-read-proxy 未就绪" >&2; exit 5; }
+  sleep 2
+done
 docker compose up -d --no-build app
 attempt=0
 until docker compose exec -T app python -c \

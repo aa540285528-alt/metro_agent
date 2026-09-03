@@ -30,8 +30,12 @@ release_publication_lock() {
   trap - EXIT HUP INT TERM
   if [ -n "${LOCK_CONTAINER:-}" ]; then
     : > "$LOCK_RELEASE_FILE"
-    if ! docker wait "$LOCK_CONTAINER" >/dev/null; then
+    lock_holder_status=$(docker wait "$LOCK_CONTAINER") || {
       echo "知识发布锁持有器异常退出" >&2
+      status=1
+    }
+    if test "${lock_holder_status:-1}" != "0"; then
+      echo "知识发布锁持有器以非零状态退出: ${lock_holder_status:-unknown}" >&2
       status=1
     fi
     docker rm "$LOCK_CONTAINER" >/dev/null 2>&1 || true
@@ -61,6 +65,7 @@ if docker compose ps --services --filter status=running | grep -qx 'knowledge-in
 fi
 verify_publication_lock
 docker compose stop app knowledge-read-proxy chroma
+verify_publication_lock
 docker compose images app > "$BACKUP_DIR/image.txt"
 printf '%s\n' "$METRO_AGENT_IMAGE" > "$BACKUP_DIR/metro-agent-image.txt"
 docker compose run --rm --no-deps db-migrate alembic current \
@@ -105,4 +110,5 @@ verify_publication_lock
   metro_auth.sql metro_agent.dump memory-chroma.tar.gz \
   knowledge-chroma.tar.gz knowledge-artifacts.tar.gz \
   redis-save.txt redis-dump.rdb owner-counts-before.txt > SHA256SUMS)
+verify_publication_lock
 printf '%s\n' "一致性备份完成，app 保持停止: $BACKUP_DIR"

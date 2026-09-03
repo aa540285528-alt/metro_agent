@@ -4,14 +4,13 @@
 from __future__ import annotations
 
 import argparse
-import hmac
 import os
 import subprocess
 import time
 from collections.abc import Sequence
 from pathlib import Path
 
-from metro_agent.knowledge.publication_lock import PublicationLock
+from metro_agent.knowledge.publication_lock import MAX_TTL_SECONDS, RENEW_SCRIPT, PublicationLock
 
 
 PUBLICATION_LOCK_KEY = "knowledge:publication"
@@ -58,12 +57,23 @@ def hold_lock(*, token_file: Path, release_file: Path) -> int:
 
 
 def verify_token(token: str) -> int:
-    """Fail closed unless ``token`` is the lease currently held in Redis."""
+    """Atomically prove and renew ownership of the coordinator's lease.
+
+    A plain ``GET`` has a time-of-check/time-of-use gap: another operator can
+    acquire the key before the caller starts its next backup step.  Use the
+    identical compare-and-PEXPIRE Lua operation as :class:`PublicationLock`.
+    """
     try:
-        current = _redis_client().get(PUBLICATION_LOCK_KEY)
+        renewed = _redis_client().eval(
+            RENEW_SCRIPT,
+            1,
+            PUBLICATION_LOCK_KEY,
+            token,
+            MAX_TTL_SECONDS * 1000,
+        )
     except Exception as exc:
         raise RuntimeError("could not verify publication lock token") from exc
-    if not isinstance(current, str) or not hmac.compare_digest(current, token):
+    if renewed != 1:
         raise RuntimeError("publication lock token is no longer held")
     return 0
 

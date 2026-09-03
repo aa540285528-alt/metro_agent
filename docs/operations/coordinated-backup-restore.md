@@ -21,7 +21,7 @@ release 和 artifact 是不可变审计证据，默认永久保留，**不自动
 deploy/operations/restore-all.sh /srv/metro-backups/pilot-20260826
 ```
 
-脚本验证全部校验和后，从备份中的 `metro-agent-image.txt` 读取并验证完整的小写 `@sha256:` digest，在执行任何 Compose 命令前导出为 `METRO_AGENT_IMAGE`，确保恢复全过程使用备份时记录的应用镜像。随后按固定顺序 **MySQL -> PostgreSQL -> Chroma -> Redis** 恢复。长期记忆 Chroma 在卷内解压到临时目录，再执行原子目录切换；旧 `current` 保留为 `rollback.previous`。完整知识 Chroma 与 artifact 同时解压，artifact 不执行清空操作，避免自动清理历史 release 证据。恢复 Chroma 和 Redis 后，脚本在启动 app 前运行 `knowledge-indexer verify`，验证 registry、已发布 pointer、validated descriptor 摘要和当前 collection；失败时 app 保持停止。脚本用 `cmp` 强制比对两个 Alembic revision 和恢复前后的 owner-counts，随后启动应用并等待 `/api/ready`。任一 revision、owner-count、知识验证或 readiness 不一致都会非零退出；不要删除 `rollback.previous`，保持写流量关闭并查明差异。
+脚本验证全部校验和后，从备份中的 `metro-agent-image.txt` 读取并验证完整的小写 `@sha256:` digest，在执行任何 Compose 命令前导出为 `METRO_AGENT_IMAGE`，确保恢复全过程使用备份时记录的应用镜像。随后按固定顺序 **MySQL -> PostgreSQL -> Chroma -> Redis** 恢复。所有 tar 成员会在解压前校验：仅允许一个预期根目录下的普通文件和目录，拒绝绝对路径、`..`、链接和设备节点。长期记忆 Chroma 在卷内解压到临时目录，再执行原子目录切换；旧 `current` 保留为 `rollback.previous`。知识 Chroma 则在完整暂存、验证后替换**整卷内容**（不产生额外嵌套目录），并将恢复前卷内容保留为 `rollback.previous`；artifact 不执行清空操作，避免自动清理历史 release 证据。恢复 Chroma 和 Redis 后，脚本在启动 app 前运行 `knowledge-indexer verify`，验证 registry、已发布 pointer、validated descriptor 摘要和当前 collection；失败时 app 保持停止。验证成功后会先启动并探测 `knowledge-read-proxy` 心跳，最后才启动 app 并等待 `/api/ready`。任一 revision、owner-count、知识验证或 readiness 不一致都会非零退出；不要删除 `rollback.previous`，保持写流量关闭并查明差异。
 
 首次部署、Chroma 升级和灾难恢复必须在隔离环境完成 `docker compose --profile knowledge-e2e` 的确定性构建、发布、查询、重启与回滚演练。该 profile 使用版本化 synthetic fixture，不使用任何真实模型密钥。
 
