@@ -113,6 +113,14 @@ def build_graph() -> StateGraph:
         },
     )
     graph.add_conditional_edges(
+        "knowledge_plan_node",
+        route_after_planner,
+        {
+            "plan_validator_node": "plan_validator_node",
+            "record_assistant_message": "record_assistant_message",
+        },
+    )
+    graph.add_conditional_edges(
         "safety_refusal_plan_node",
         route_after_planner,
         {
