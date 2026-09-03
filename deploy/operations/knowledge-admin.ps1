@@ -17,7 +17,7 @@ if ($Command -notin $allowed) {
     throw "allowed commands: build-and-publish, rollback, verify, status"
 }
 
-$operator = if ($env:USERNAME) { $env:USERNAME } else { [Environment]::UserName }
+$operator = $principal.Identity.Name
 $dockerArguments = @("compose", "--profile", "knowledge-admin", "run", "--rm", "knowledge-indexer", $Command)
 $forceReasons = @("indexer-upgrade", "embedding-model-change", "reranker-model-change", "chunker-change", "recovery")
 if ($Command -eq "build-and-publish") {

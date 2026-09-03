@@ -236,7 +236,7 @@ def test_knowledge_admin_wrappers_only_accept_governed_commands() -> None:
     for command in ("build-and-publish", "rollback", "verify", "status"):
         assert command in shell
         assert command in powershell
-    assert "${USER" in shell
-    assert "$env:USERNAME" in powershell
+    assert "id -un" in shell
+    assert "$principal.Identity.Name" in powershell
     assert "id -u" in shell
     assert "WindowsPrincipal" in powershell

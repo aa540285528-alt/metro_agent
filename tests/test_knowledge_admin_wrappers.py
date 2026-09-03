@@ -14,6 +14,9 @@ def test_shell_wrapper_requires_effective_root_and_has_no_environment_admin_bypa
     content = SHELL_WRAPPER.read_text(encoding="utf-8")
 
     assert 'id -u' in content
+    assert 'operator="$(id -un)"' in content
+    assert "SUDO_USER" not in content
+    assert "${USER" not in content
     assert "METRO_AGENT_KNOWLEDGE_ADMIN" not in content
 
 
@@ -22,6 +25,8 @@ def test_powershell_wrapper_uses_windows_administrator_role() -> None:
 
     assert "WindowsPrincipal" in content
     assert "WindowsBuiltInRole]::Administrator" in content
+    assert "$principal.Identity.Name" in content
+    assert "$env:USERNAME" not in content
     assert "METRO_AGENT_KNOWLEDGE_ADMIN" not in content
 
 

@@ -7,7 +7,7 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 77
 fi
 
-operator="${SUDO_USER:-${USER:-$(id -un)}}"
+operator="$(id -un)"
 command="${1:-}"
 case "$command" in
   build-and-publish|rollback|verify|status) ;;
