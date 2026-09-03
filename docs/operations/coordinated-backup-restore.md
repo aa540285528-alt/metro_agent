@@ -11,7 +11,9 @@ export METRO_AGENT_IMAGE=registry.example/metro-agent@sha256:0123456789abcdef012
 deploy/operations/backup-all.sh /srv/metro-backups/pilot-20260826
 ```
 
-脚本先执行 `docker compose stop app`，随后运行 `mysqldump --single-transaction`、`pg_dump`、两个 Chroma 目录快照和 Redis `SAVE`，并记录两个 Alembic revision、完整镜像 digest、PostgreSQL/Chroma owner-counts 与 `SHA256SUMS`。脚本拒绝覆盖已有目录；任何命令失败都会停止，应用保持关闭。
+脚本先以同一 `knowledge:publication` token 校验锁预检，确认 `knowledge-indexer` 未在运行，并执行 `docker compose stop app knowledge-read-proxy chroma`。随后运行 `mysqldump --single-transaction`、`pg_dump`、长期记忆 Chroma 快照、完整 `knowledge_chroma_data` 与完整 `knowledge_artifact_data` 归档、Redis `SAVE`，并记录两个 Alembic revision、完整镜像 digest、owner-counts 与 `SHA256SUMS`。知识归档固定命名为 `knowledge-chroma.tar.gz`、`knowledge-artifacts.tar.gz`，二者缺一不可。脚本拒绝覆盖已有目录；任何命令失败都会停止，应用保持关闭。
+
+release 和 artifact 是不可变审计证据，默认永久保留，**不自动清理**。归档文件的静态加密、密钥保管和保留期限由备份目标负责；脚本不替代备份介质加密。
 
 ## 隔离恢复
 
@@ -19,7 +21,9 @@ deploy/operations/backup-all.sh /srv/metro-backups/pilot-20260826
 deploy/operations/restore-all.sh /srv/metro-backups/pilot-20260826
 ```
 
-脚本验证全部校验和后，从备份中的 `metro-agent-image.txt` 读取并验证完整的小写 `@sha256:` digest，在执行任何 Compose 命令前导出为 `METRO_AGENT_IMAGE`，确保恢复全过程使用备份时记录的应用镜像。随后按固定顺序 **MySQL -> PostgreSQL -> Chroma -> Redis** 恢复。Chroma 在卷内解压到临时目录，再执行原子目录切换；旧 `current` 保留为 `rollback.previous`。脚本用 `cmp` 强制比对两个 Alembic revision 和恢复前后的 owner-counts，启动应用并等待 `/api/ready`。任一 revision、owner-count 或 readiness 不一致都会非零退出；不要删除 `rollback.previous`，保持写流量关闭并查明差异。
+脚本验证全部校验和后，从备份中的 `metro-agent-image.txt` 读取并验证完整的小写 `@sha256:` digest，在执行任何 Compose 命令前导出为 `METRO_AGENT_IMAGE`，确保恢复全过程使用备份时记录的应用镜像。随后按固定顺序 **MySQL -> PostgreSQL -> Chroma -> Redis** 恢复。长期记忆 Chroma 在卷内解压到临时目录，再执行原子目录切换；旧 `current` 保留为 `rollback.previous`。完整知识 Chroma 与 artifact 同时解压，artifact 不执行清空操作，避免自动清理历史 release 证据。恢复 Chroma 和 Redis 后，脚本在启动 app 前运行 `knowledge-indexer verify`，验证 registry、已发布 pointer、validated descriptor 摘要和当前 collection；失败时 app 保持停止。脚本用 `cmp` 强制比对两个 Alembic revision 和恢复前后的 owner-counts，随后启动应用并等待 `/api/ready`。任一 revision、owner-count、知识验证或 readiness 不一致都会非零退出；不要删除 `rollback.previous`，保持写流量关闭并查明差异。
+
+首次部署、Chroma 升级和灾难恢复必须在隔离环境完成 `docker compose --profile knowledge-e2e` 的确定性构建、发布、查询、重启与回滚演练。该 profile 使用版本化 synthetic fixture，不使用任何真实模型密钥。
 
 恢复验收还必须抽查 MySQL admin/user 数量与状态、PostgreSQL `owner_id` 和 Trace `user_id`、长期记忆 metadata、跨用户不可见、知识检索和 Redis checkpoint。脚本比对的是精确计数，业务语义抽查由验收人记录。
 

@@ -48,7 +48,8 @@
 - [ ] 镜像回滚和数据库前滚修复步骤已演练；任何有损 downgrade 都有单独审批。
 - [ ] 迁移中断恢复演练完成：已保存 `information_schema` 对账证据，未盲目 `stamp`，`auth-migrate` 失败时 `app` 保持阻断。
 - [ ] legacy 迁移已先运行回滚预览，经人工填写 `EXPECTED_COUNT` 和备份引用后才 apply；不一致时已验证自动中止。
-- [ ] 一致性备份恢复演练使用脚本按 MySQL -> PostgreSQL -> Chroma -> Redis 恢复，Chroma 完成原子目录切换并保留回滚目录。
+- [ ] 一致性备份恢复演练使用脚本按 MySQL -> PostgreSQL -> Chroma -> Redis 恢复，Chroma 完成原子目录切换并保留回滚目录；完整知识 Chroma/artifact 以 `knowledge:publication` 锁保护并在 app 启动前验证 registry/pointer/descriptor。
+- [ ] 首次部署和 Chroma 升级已在隔离环境运行 `knowledge-e2e` 确定性演练（构建、发布、查询、重启、回滚）；演练不使用真实模型密钥，release/artifact 默认永久保留且不自动清理，备份加密由备份目标负责。
 - [ ] digest 回滚仅使用完整 `METRO_AGENT_IMAGE=...@sha256:...`，两个 Alembic revision、owner-counts 和 `/api/ready` 均复核通过。
 
 ## 质量与已知限制

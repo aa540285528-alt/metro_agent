@@ -17,7 +17,11 @@ if [ -e "$BACKUP_DIR" ]; then
 fi
 mkdir -m 0700 "$BACKUP_DIR"
 
-docker compose stop app
+if docker compose ps --services --filter status=running | grep -qx 'knowledge-indexer'; then
+  echo "知识 indexer 仍在运行，拒绝备份" >&2
+  exit 3
+fi
+docker compose stop app knowledge-read-proxy chroma
 docker compose images app > "$BACKUP_DIR/image.txt"
 printf '%s\n' "$METRO_AGENT_IMAGE" > "$BACKUP_DIR/metro-agent-image.txt"
 docker compose run --rm --no-deps db-migrate alembic current \
@@ -34,7 +38,12 @@ docker compose exec -T postgres \
   > "$BACKUP_DIR/metro_agent.dump"
 
 docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup" app python -c \
-  "import tarfile; a=tarfile.open('/backup/chroma.tar.gz','w:gz'); a.add('/var/lib/metro-agent/chroma/current',arcname='current'); a.close(); b=tarfile.open('/backup/memory-chroma.tar.gz','w:gz'); b.add('/var/lib/metro-agent/memory-chroma/current',arcname='current'); b.close()"
+  "import tarfile; a=tarfile.open('/backup/memory-chroma.tar.gz','w:gz'); a.add('/var/lib/metro-agent/memory-chroma/current',arcname='current'); a.close()"
+# Keep one token-checked publication lease while archiving both roots.  Chroma
+# is already stopped, so this is an immutable release-unit snapshot.
+docker compose --profile knowledge-admin run --rm --no-deps -v "$BACKUP_DIR:/backup" \
+  knowledge-backup python deploy/operations/with-knowledge-publication-lock.py backup -- \
+  python -c "import tarfile; a=tarfile.open('/backup/knowledge-chroma.tar.gz','w:gz'); a.add('/chroma/chroma',arcname='chroma'); a.close(); b=tarfile.open('/backup/knowledge-artifacts.tar.gz','w:gz'); b.add('/var/lib/metro-agent/knowledge-artifacts',arcname='knowledge-artifacts'); b.close()"
 
 docker compose exec -T redis redis-cli SAVE > "$BACKUP_DIR/redis-save.txt"
 docker compose cp redis:/data/dump.rdb "$BACKUP_DIR/redis-dump.rdb"
@@ -46,15 +55,13 @@ docker compose exec -T postgres psql -X -U metro_agent -d metro_agent -At -F '|'
   -c "SELECT 'postgres.agent_traces', user_id, count(*) FROM agent_traces GROUP BY user_id ORDER BY user_id" \
   >> "$BACKUP_DIR/owner-counts-before.txt"
 docker compose run --rm --no-deps app python deploy/operations/chroma-owner-counts.py \
-  knowledge /var/lib/metro-agent/chroma/current \
-  >> "$BACKUP_DIR/owner-counts-before.txt"
-docker compose run --rm --no-deps app python deploy/operations/chroma-owner-counts.py \
   memory /var/lib/metro-agent/memory-chroma/current \
   >> "$BACKUP_DIR/owner-counts-before.txt"
 
 (cd "$BACKUP_DIR" && sha256sum \
   image.txt metro-agent-image.txt \
   alembic-current-postgres.txt alembic-current-mysql.txt \
-  metro_auth.sql metro_agent.dump chroma.tar.gz memory-chroma.tar.gz \
+  metro_auth.sql metro_agent.dump memory-chroma.tar.gz \
+  knowledge-chroma.tar.gz knowledge-artifacts.tar.gz \
   redis-save.txt redis-dump.rdb owner-counts-before.txt > SHA256SUMS)
 printf '%s\n' "一致性备份完成，app 保持停止: $BACKUP_DIR"
