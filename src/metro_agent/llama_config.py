@@ -1,7 +1,3 @@
-from llama_index.llms.deepseek import DeepSeek
-from llama_index.core import Settings
-from llama_index.postprocessor.sbert_rerank import SentenceTransformerRerank
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 import os
 from pathlib import Path
 
@@ -11,6 +7,11 @@ from metro_agent.storage_paths import configured_storage_path
 
 # LlamaIndex基础配置
 def init_llama_index_components():
+    from llama_index.core import Settings
+    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+    from llama_index.llms.deepseek import DeepSeek
+    from llama_index.postprocessor.sbert_rerank import SentenceTransformerRerank
+
     # 1. 设置 LLM
     Settings.llm = DeepSeek(
         model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),

@@ -35,6 +35,7 @@ from metro_agent.auth.rate_limit import LoginRateLimiter
 from metro_agent.auth.service import AuthService
 from metro_agent.readiness import check_default_readiness
 from metro_agent.storage.history.service import ConversationNotFound
+from metro_agent.tools.knowledge_index_registry import KnowledgeIndexUnavailableError
 from metro_agent.observability.query_service import (
     MonitoringFilter,
     MonitoringQueryService,
@@ -405,6 +406,15 @@ def create_app(
                     ),
                     user_id=owner_subject,
                     message=payload.message,
+                )
+            except KnowledgeIndexUnavailableError as exc:
+                logger.warning(
+                    "operation=run_chat error_type=%s",
+                    type(exc).__name__,
+                )
+                yield encode_sse(
+                    "error",
+                    {"message": "已发布知识库暂不可用，请稍后重试"},
                 )
             except AgentRunError:
                 logger.warning("Agent chat did not produce a usable answer")

@@ -29,7 +29,7 @@ app -> knowledge-read-proxy -> Chroma backend
 
 生产运行时完全禁止 `PersistentClient`。只有 `chroma` 服务挂载知识索引卷；`app` 的 RAG HTTP client 固定访问 `knowledge-read-proxy`，`knowledge-indexer` 是唯一读取 `CHROMA_HOST`/`CHROMA_PORT` 并在内部网络直接访问 Chroma 的 HTTP client。`knowledge-read-proxy` 的 Chroma 上游固定为内部地址，不读取这两个环境变量。`chroma` 没有宿主机端口，仅处于内部 backend 网络。
 
-`app` 加入 `app_backend`、`knowledge_frontend` 与 `controlled_egress`：前者仅用于应用数据服务，`knowledge_frontend` 仅用于访问 read-proxy，`controlled_egress` 仅用于经部署侧出口策略批准的模型和外部服务；它既不能解析也不能连接 Chroma，且绝不加入 `knowledge_backend`。`knowledge-indexer` 只连接 Chroma backend 网络且不暴露端口。`knowledge-read-proxy` 连接 Chroma backend 网络，并以只读方式挂载 artifact 卷；它在转发前验证 registry 指针与当前 validated artifact 摘要。代理是最小 Python ASGI 服务，固定上游 Chroma 地址并显式白名单 Chroma 1.5.9 所需的 identity、tenant、database、registry/collection 读取、count、`get` 与 `query` 路由；它只允许 registry collection 与 registry 当前指针所指 collection。所有 create、add、update、upsert、delete、fork、reset、`search`、PUT 与 DELETE 路由返回 `403`。代理路由白名单与版本锁同步测试。
+`app` 加入 `app_backend`、`knowledge_frontend` 与内部 `app_egress`：前者仅用于应用数据服务，`knowledge_frontend` 仅用于访问 read-proxy，`app_egress` 只用于访问固定 `egress-gateway`。应用没有直连公网路由，HTTP(S) 代理固定为网关；唯一连接非内部 `controlled_egress` 的服务是该网关。网关使用只读挂载、随仓库版本化的 Squid 配置及精确域名允许列表，拒绝未列域名、非安全端口和所有其他请求；变更模型或外部服务目的地必须变更并审查允许列表。应用既不能解析也不能连接 Chroma，且绝不加入 `knowledge_backend`。`knowledge-indexer` 只连接 Chroma backend 网络且不暴露端口。`knowledge-read-proxy` 连接 Chroma backend 网络，并以只读方式挂载 artifact 卷；它在转发前验证 registry 指针与当前 validated artifact 摘要。代理是最小 Python ASGI 服务，固定上游 Chroma 地址并显式白名单 Chroma 1.5.9 所需的 identity、tenant、database、registry/collection 读取、count、`get` 与 `query` 路由；它只允许 registry collection 与 registry 当前指针所指 collection。所有 create、add、update、upsert、delete、fork、reset、`search`、PUT 与 DELETE 路由返回 `403`。代理路由白名单与版本锁同步测试。
 
 ## 配置与持久化资源
 

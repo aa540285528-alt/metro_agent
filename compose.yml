@@ -20,13 +20,19 @@ services:
       DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:-}"
       DASHSCOPE_BASE_URL: "${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
       OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://host.docker.internal:11434}"
+      HTTP_PROXY: http://egress-gateway:3128
+      HTTPS_PROXY: http://egress-gateway:3128
+      http_proxy: http://egress-gateway:3128
+      https_proxy: http://egress-gateway:3128
+      NO_PROXY: localhost,127.0.0.1,mysql,postgres,redis,knowledge-read-proxy,wiremock
+      no_proxy: localhost,127.0.0.1,mysql,postgres,redis,knowledge-read-proxy,wiremock
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
       - mysql_ca:/etc/mysql/ca:ro
       - "${MODEL_DIR:?请在 .env 中设置 MODEL_DIR}:/models:ro"
       - memory_chroma_data:/var/lib/metro-agent/memory-chroma
-    networks: [knowledge_frontend, app_backend, controlled_egress]
+    networks: [knowledge_frontend, app_backend, app_egress]
     depends_on:
       db-migrate:
         condition: service_completed_successfully
@@ -204,6 +210,22 @@ services:
         condition: service_started
     restart: "no"
 
+  # The only service with a non-internal network.  Squid's versioned allowlist
+  # is mounted read-only; app has no route to the Internet except this proxy.
+  egress-gateway:
+    image: ubuntu/squid:6.10-24.04_beta
+    command: ["squid", "-N", "-f", "/etc/squid/squid.conf"]
+    read_only: true
+    tmpfs:
+      - /run
+      - /var/log/squid
+      - /var/spool/squid
+    volumes:
+      - ./deploy/egress/squid.conf:/etc/squid/squid.conf:ro
+      - ./deploy/egress/allowed-domains.txt:/etc/squid/allowed-domains.txt:ro
+    networks: [app_egress, controlled_egress]
+    restart: unless-stopped
+
   wiremock:
     image: wiremock/wiremock:3.13.2
     profiles: ["mock"]
@@ -229,6 +251,8 @@ networks:
   knowledge_frontend:
     internal: true
   knowledge_backend:
+    internal: true
+  app_egress:
     internal: true
   controlled_egress:
     internal: false

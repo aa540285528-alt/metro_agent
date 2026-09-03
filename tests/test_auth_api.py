@@ -29,6 +29,7 @@ from metro_agent.auth.models import AuthBase
 from metro_agent.auth.router import get_auth_cookie_secure
 from metro_agent.auth.service import AuthService
 from metro_agent.storage.history.service import ConversationNotFound
+from metro_agent.tools.knowledge_index_registry import KnowledgeIndexUnavailableError
 
 
 class StubAuthService:
@@ -544,6 +545,35 @@ def test_only_claim_winner_enters_runner_when_new_thread_competes(auth_api) -> N
     finally:
         first.close()
         second.close()
+
+
+def test_stream_returns_precise_message_when_published_knowledge_is_unavailable(
+    auth_api,
+) -> None:
+    assert login(auth_api.client, "operator", "CorrectHorseBattery2").status_code == 200
+
+    def unavailable_knowledge(*_args, **_kwargs):
+        raise KnowledgeIndexUnavailableError("read proxy rejected current collection")
+
+    auth_api.app.state.graph = object()
+    response_app = create_app(
+        graph_factory=lambda: object(),
+        history_service_factory=lambda: auth_api.history,
+        monitoring_service_factory=lambda: FakeMonitoringService(),
+        auth_service_factory=lambda: auth_api.service,
+        chat_runner=unavailable_knowledge,
+    )
+    with TestClient(response_app) as client:
+        assert login(client, "operator", "CorrectHorseBattery2").status_code == 200
+        response = client.post(
+            "/api/chat/stream", json={"thread_id": "knowledge-down", "message": "查询规程"}
+        )
+
+    assert response.status_code == 200
+    assert "event: error" in response.text
+    assert "已发布知识库暂不可用，请稍后重试" in response.text
+    assert "event: final" not in response.text
+    assert auth_api.history.recorded_owners == []
 
 
 def test_stream_rechecks_session_before_calling_runner(

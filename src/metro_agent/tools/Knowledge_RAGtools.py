@@ -3,15 +3,9 @@
 import logging
 import os
 
-from llama_index.core import StorageContext, VectorStoreIndex
-from llama_index.core.indices.query.query_transform import HyDEQueryTransform
-from llama_index.core.postprocessor import SimilarityPostprocessor
-from llama_index.core.query_engine import TransformQueryEngine
-from llama_index.vector_stores.chroma import ChromaVectorStore
-
 from metro_agent.tools.knowledge_index_registry import KnowledgeIndexUnavailableError
 from metro_agent.knowledge.chroma_client import get_knowledge_read_proxy_client
-from metro_agent.knowledge.releases import ReleaseValidationError, read_release_pointer
+from metro_agent.knowledge.releases import read_release_pointer
 from metro_agent.llama_config import (
     ALPHA,
     SIMILARITY_CUTOFF,
@@ -24,24 +18,36 @@ _query_engine = None
 _query_engine_collection_name = None
 logger = logging.getLogger(__name__)
 DEBUG_HYDE = os.getenv("RAG_DEBUG_HYDE", "0") == "1"
+PUBLISHED_KNOWLEDGE_UNAVAILABLE_MESSAGE = "已发布知识库暂不可用，请稍后重试"
 
 
-class DebugHyDEQueryTransform(HyDEQueryTransform):
-    def _run(self, query_bundle, metadata):
-        transformed_bundle = super()._run(query_bundle, metadata)
+def _debug_hyde_query_transform():
+    """Import optional retrieval machinery only when a query reaches it."""
+    from llama_index.core.indices.query.query_transform import HyDEQueryTransform
 
-        if DEBUG_HYDE:
-            logger.debug(
-                "HyDE query=%r retrieval_texts=%r",
-                query_bundle.query_str,
-                transformed_bundle.embedding_strs,
-            )
+    class DebugHyDEQueryTransform(HyDEQueryTransform):
+        def _run(self, query_bundle, metadata):
+            transformed_bundle = super()._run(query_bundle, metadata)
 
-        return transformed_bundle
+            if DEBUG_HYDE:
+                logger.debug(
+                    "HyDE query=%r retrieval_texts=%r",
+                    query_bundle.query_str,
+                    transformed_bundle.embedding_strs,
+                )
+
+            return transformed_bundle
+
+    return DebugHyDEQueryTransform(include_original=True)
 
 
 def get_chroma_client():
-    return get_knowledge_read_proxy_client()
+    try:
+        return get_knowledge_read_proxy_client()
+    except Exception as exc:
+        raise KnowledgeIndexUnavailableError(
+            PUBLISHED_KNOWLEDGE_UNAVAILABLE_MESSAGE
+        ) from exc
 
 
 def resolve_published_collection_name(
@@ -51,9 +57,9 @@ def resolve_published_collection_name(
         client = get_chroma_client()
     try:
         pointer = read_release_pointer(client)
-    except ReleaseValidationError as exc:
+    except Exception as exc:
         raise KnowledgeIndexUnavailableError(
-            "知识库已发布版本不可用，请联系管理员。"
+            PUBLISHED_KNOWLEDGE_UNAVAILABLE_MESSAGE
         ) from exc
     if pointer is None:
         raise KnowledgeIndexUnavailableError(
@@ -65,12 +71,13 @@ def resolve_published_collection_name(
 def get_published_collection(client, collection_name: str):
     try:
         collection = client.get_collection(name=collection_name)
+        collection_count = collection.count()
     except Exception as exc:
         raise KnowledgeIndexUnavailableError(
-            "知识库已发布索引不可读取，请重新运行离线构建命令。"
+            PUBLISHED_KNOWLEDGE_UNAVAILABLE_MESSAGE
         ) from exc
 
-    if collection.count() <= 0:
+    if collection_count <= 0:
         raise KnowledgeIndexUnavailableError(
             "知识库已发布索引为空，请重新运行离线构建命令。"
         )
@@ -78,6 +85,9 @@ def get_published_collection(client, collection_name: str):
 
 
 def build_storage_context(chromadb_collection):
+    from llama_index.core import StorageContext
+    from llama_index.vector_stores.chroma import ChromaVectorStore
+
     vector_store = ChromaVectorStore(
         chroma_collection=chromadb_collection,
         hybrid_search=True,
@@ -87,6 +97,10 @@ def build_storage_context(chromadb_collection):
 
 def build_query_engine():
     global _query_engine, _query_engine_collection_name
+
+    from llama_index.core import VectorStoreIndex
+    from llama_index.core.postprocessor import SimilarityPostprocessor
+    from llama_index.core.query_engine import TransformQueryEngine
 
     client = get_chroma_client()
     collection_name = resolve_published_collection_name(client)
@@ -117,7 +131,7 @@ def build_query_engine():
     )
     _query_engine = TransformQueryEngine(
         query_engine,
-        DebugHyDEQueryTransform(include_original=True),
+        _debug_hyde_query_transform(),
     )
     _query_engine_collection_name = collection_name
     return _query_engine
@@ -125,7 +139,14 @@ def build_query_engine():
 
 def build_rag_search(query):
     """Run retrieval and return the answer with source metadata."""
-    response = build_query_engine().query(query)
+    try:
+        response = build_query_engine().query(query)
+    except KnowledgeIndexUnavailableError:
+        raise
+    except Exception as exc:
+        raise KnowledgeIndexUnavailableError(
+            PUBLISHED_KNOWLEDGE_UNAVAILABLE_MESSAGE
+        ) from exc
     sources = []
     source_docs = []
     index_build_id = _index_build_id(_query_engine_collection_name)

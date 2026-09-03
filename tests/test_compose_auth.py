@@ -213,17 +213,50 @@ def test_compose_isolates_published_knowledge_from_the_application() -> None:
     assert services["app"]["networks"] == [
         "knowledge_frontend",
         "app_backend",
-        "controlled_egress",
+        "app_egress",
     ]
     assert "knowledge_backend" not in services["app"]["networks"]
+    assert "controlled_egress" not in services["app"]["networks"]
     assert "KNOWLEDGE_READ_PROXY_URL" not in services["app"]["environment"]
+    assert services["app"]["environment"]["HTTPS_PROXY"] == (
+        "http://egress-gateway:3128"
+    )
+    assert services["app"]["environment"]["NO_PROXY"].split(",") == [
+        "localhost",
+        "127.0.0.1",
+        "mysql",
+        "postgres",
+        "redis",
+        "knowledge-read-proxy",
+        "wiremock",
+    ]
+    gateway = services["egress-gateway"]
+    assert gateway["networks"] == ["app_egress", "controlled_egress"]
+    assert gateway["read_only"] is True
+    assert compose["networks"]["app_egress"] == {"internal": True}
     assert compose["networks"]["controlled_egress"] == {"internal": False}
     assert {
         service_name
         for service_name, service in services.items()
         if "controlled_egress" in service.get("networks", [])
-    } == {"app"}
-    for network in ("app_backend", "knowledge_frontend", "knowledge_backend"):
+    } == {"egress-gateway"}
+    allowlist = (ROOT / "deploy" / "egress" / "allowed-domains.txt").read_text(
+        encoding="utf-8"
+    )
+    squid_config = (ROOT / "deploy" / "egress" / "squid.conf").read_text(
+        encoding="utf-8"
+    )
+    assert "api.deepseek.com" in allowlist
+    assert "dashscope.aliyuncs.com" in allowlist
+    assert 'dstdomain "/etc/squid/allowed-domains.txt"' in squid_config
+    assert "http_access allow allowed_model_destinations" in squid_config
+    assert "http_access deny all" in squid_config
+    for network in (
+        "app_backend",
+        "knowledge_frontend",
+        "knowledge_backend",
+        "app_egress",
+    ):
         assert compose["networks"][network]["internal"] is True
 
 
