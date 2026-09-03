@@ -14,6 +14,7 @@ class KnowledgeSettings:
     artifact_root: Path | None
     source_root: Path | None
     e2e: bool
+    knowledge_read_proxy_url: str = "http://knowledge-read-proxy:8000"
 
     @classmethod
     def from_environment(cls) -> KnowledgeSettings:

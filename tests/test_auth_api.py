@@ -955,7 +955,9 @@ def test_readiness_returns_ok_when_all_dependencies_are_available(auth_api) -> N
     assert calls == 1
 
 
-@pytest.mark.parametrize("dependency", ["auth mysql", "business postgres", "redis"])
+@pytest.mark.parametrize(
+    "dependency", ["auth mysql", "business postgres", "redis", "knowledge published"]
+)
 def test_readiness_dependency_failure_is_503_without_dsn(
     auth_api, dependency: str
 ) -> None:

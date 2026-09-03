@@ -9,7 +9,6 @@ services:
       AUTH_COOKIE_SECURE: "${AUTH_COOKIE_SECURE:-false}"
       AUTH_SESSION_TTL_SECONDS: "${AUTH_SESSION_TTL_SECONDS:-28800}"
       SHORT_TERM_MEMORY_REDIS_URL: redis://redis:6379
-      CHROMA_DB_DIR: /var/lib/metro-agent/chroma/current
       MEMORY_CHROMA_DB_DIR: /var/lib/metro-agent/memory-chroma/current
       EMBEDDING_MODEL_PATH: /models/bge-m3
       RERANK_MODEL_PATH: /models/bge-reranker
@@ -26,8 +25,8 @@ services:
     volumes:
       - mysql_ca:/etc/mysql/ca:ro
       - "${MODEL_DIR:?请在 .env 中设置 MODEL_DIR}:/models:ro"
-      - chroma_data:/var/lib/metro-agent/chroma
       - memory_chroma_data:/var/lib/metro-agent/memory-chroma
+    networks: [knowledge_frontend, app_backend]
     depends_on:
       db-migrate:
         condition: service_completed_successfully
@@ -56,6 +55,7 @@ services:
       postgres:
         condition: service_healthy
     restart: "no"
+    networks: [app_backend]
 
   auth-migrate:
     image: ${METRO_AGENT_IMAGE:-metro-agent:local}
@@ -68,6 +68,7 @@ services:
       mysql:
         condition: service_healthy
     restart: "no"
+    networks: [app_backend]
 
   postgres:
     image: postgres:16-alpine
@@ -83,6 +84,7 @@ services:
       timeout: 5s
       retries: 20
     restart: unless-stopped
+    networks: [app_backend]
 
   mysql-cert-init:
     image: mysql:8.4
@@ -110,6 +112,7 @@ services:
       - mysql_ca:/ca
       - mysql_server_certs:/server
     restart: "no"
+    networks: [app_backend]
 
   mysql:
     image: mysql:8.4
@@ -142,6 +145,7 @@ services:
       retries: 30
       start_period: 20s
     restart: unless-stopped
+    networks: [app_backend]
 
   redis:
     image: redis:8.4-alpine
@@ -156,6 +160,49 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+    networks: [app_backend, knowledge_backend]
+
+  chroma:
+    image: chromadb/chroma:1.5.9
+    volumes:
+      - knowledge_chroma_data:/chroma/chroma
+    networks: [knowledge_backend]
+    restart: unless-stopped
+
+  knowledge-read-proxy:
+    image: ${METRO_AGENT_IMAGE:-metro-agent:local}
+    command: ["uvicorn", "metro_agent.knowledge_read_proxy:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      KNOWLEDGE_ARTIFACT_ROOT: /var/lib/metro-agent/knowledge-artifacts
+    volumes:
+      - knowledge_artifact_data:/var/lib/metro-agent/knowledge-artifacts:ro
+    networks: [knowledge_frontend, knowledge_backend]
+    depends_on:
+      chroma:
+        condition: service_started
+    restart: unless-stopped
+
+  knowledge-indexer:
+    image: ${METRO_AGENT_IMAGE:-metro-agent:local}
+    command: ["python", "-m", "metro_agent.tools.knowledge_indexer", "status"]
+    profiles: ["knowledge-admin"]
+    environment:
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KNOWLEDGE_PATH: /knowledge/source
+      KNOWLEDGE_ARTIFACT_ROOT: /var/lib/metro-agent/knowledge-artifacts
+    volumes:
+      - ${KNOWLEDGE_SOURCE_DIR:?请在 .env 中设置 KNOWLEDGE_SOURCE_DIR}:/knowledge/source:ro
+      - knowledge_artifact_data:/var/lib/metro-agent/knowledge-artifacts
+    networks: [knowledge_backend, app_backend]
+    depends_on:
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    restart: "no"
 
   wiremock:
     image: wiremock/wiremock:3.13.2
@@ -164,12 +211,22 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - ./deploy/wiremock/mappings:/home/wiremock/mappings:ro
+    networks: [app_backend]
 
 volumes:
   postgres_data:
   mysql_data:
   mysql_ca:
   mysql_server_certs:
-  chroma_data:
   memory_chroma_data:
   redis_data:
+  knowledge_chroma_data:
+  knowledge_artifact_data:
+
+networks:
+  app_backend:
+    internal: true
+  knowledge_frontend:
+    internal: true
+  knowledge_backend:
+    internal: true

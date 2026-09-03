@@ -170,19 +170,16 @@ def test_redis_includes_search_capability_required_by_checkpointer() -> None:
     assert "COMMAND INFO FT.INFO" in healthcheck
 
 
-def test_compose_persists_redis_and_both_chroma_stores_for_recovery() -> None:
+def test_compose_persists_redis_memory_and_governed_knowledge_stores_for_recovery() -> None:
     compose = _compose()
     services = compose["services"]
     app = services["app"]
     redis = services["redis"]
 
-    assert app["environment"]["CHROMA_DB_DIR"] == (
-        "/var/lib/metro-agent/chroma/current"
-    )
     assert app["environment"]["MEMORY_CHROMA_DB_DIR"] == (
         "/var/lib/metro-agent/memory-chroma/current"
     )
-    assert "chroma_data:/var/lib/metro-agent/chroma" in app["volumes"]
+    assert "CHROMA_DB_DIR" not in app["environment"]
     assert (
         "memory_chroma_data:/var/lib/metro-agent/memory-chroma"
         in app["volumes"]
@@ -190,7 +187,56 @@ def test_compose_persists_redis_and_both_chroma_stores_for_recovery() -> None:
     assert "redis_data:/data" in redis["volumes"]
     assert "appendonly" in " ".join(redis["command"]).lower()
     assert set(compose["volumes"]) >= {
-        "chroma_data",
         "memory_chroma_data",
         "redis_data",
+        "knowledge_chroma_data",
+        "knowledge_artifact_data",
     }
+
+
+def test_compose_isolates_published_knowledge_from_the_application() -> None:
+    compose = _compose()
+    services = compose["services"]
+
+    assert services["chroma"]["image"] == "chromadb/chroma:1.5.9"
+    assert "ports" not in services["chroma"]
+    assert services["chroma"]["networks"] == ["knowledge_backend"]
+    assert services["knowledge-read-proxy"]["networks"] == [
+        "knowledge_frontend",
+        "knowledge_backend",
+    ]
+    assert services["knowledge-read-proxy"]["command"][:2] == [
+        "uvicorn",
+        "metro_agent.knowledge_read_proxy:app",
+    ]
+    assert any(value.endswith(":ro") for value in services["knowledge-read-proxy"]["volumes"])
+    assert services["app"]["networks"] == ["knowledge_frontend", "app_backend"]
+    assert "knowledge_backend" not in services["app"]["networks"]
+    assert "KNOWLEDGE_READ_PROXY_URL" not in services["app"]["environment"]
+
+
+def test_compose_runs_knowledge_indexer_only_as_an_admin_profile() -> None:
+    compose = _compose()
+    indexer = compose["services"]["knowledge-indexer"]
+
+    assert indexer["profiles"] == ["knowledge-admin"]
+    assert indexer["networks"] == ["knowledge_backend", "app_backend"]
+    assert any(value.endswith(":ro") for value in indexer["volumes"])
+    assert any(not value.endswith(":ro") for value in indexer["volumes"])
+
+
+def test_knowledge_admin_wrappers_only_accept_governed_commands() -> None:
+    shell = (ROOT / "deploy" / "operations" / "knowledge-admin.sh").read_text(
+        encoding="utf-8"
+    )
+    powershell = (ROOT / "deploy" / "operations" / "knowledge-admin.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    for command in ("build-and-publish", "rollback", "verify", "status"):
+        assert command in shell
+        assert command in powershell
+    assert "${USER" in shell
+    assert "$env:USERNAME" in powershell
+    assert "METRO_AGENT_KNOWLEDGE_ADMIN" in shell
+    assert "METRO_AGENT_KNOWLEDGE_ADMIN" in powershell

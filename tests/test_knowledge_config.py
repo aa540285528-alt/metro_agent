@@ -25,6 +25,10 @@ def test_settings_read_http_endpoint_and_optional_paths(monkeypatch) -> None:
         source_root=Path("/knowledge/source"),
         e2e=True,
     )
+    assert (
+        KnowledgeSettings.from_environment().knowledge_read_proxy_url
+        == "http://knowledge-read-proxy:8000"
+    )
 
 
 def test_settings_default_to_chroma_http_endpoint(monkeypatch) -> None:
@@ -89,6 +93,33 @@ def test_client_factory_connects_through_configured_http_endpoint(monkeypatch) -
     client = get_chroma_client(
         KnowledgeSettings(
             chroma_host="knowledge-read-proxy",
+            chroma_port=8000,
+            artifact_root=None,
+            source_root=None,
+            e2e=False,
+        )
+    )
+
+    assert client is not None
+    assert calls == [("knowledge-read-proxy", 8000)]
+
+
+def test_runtime_client_uses_only_the_configured_read_proxy(monkeypatch) -> None:
+    from metro_agent.knowledge.chroma_client import get_knowledge_read_proxy_client
+
+    calls: list[tuple[str, int]] = []
+
+    def fake_http_client(*, host: str, port: int) -> object:
+        calls.append((host, port))
+        return object()
+
+    monkeypatch.setattr(
+        "metro_agent.knowledge.chroma_client.chromadb.HttpClient", fake_http_client
+    )
+
+    client = get_knowledge_read_proxy_client(
+        KnowledgeSettings(
+            chroma_host="chroma",
             chroma_port=8000,
             artifact_root=None,
             source_root=None,

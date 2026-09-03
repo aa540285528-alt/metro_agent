@@ -2,27 +2,18 @@
 
 import logging
 import os
-from pathlib import Path
 
-import chromadb
 from llama_index.core import StorageContext, VectorStoreIndex
 from llama_index.core.indices.query.query_transform import HyDEQueryTransform
 from llama_index.core.postprocessor import SimilarityPostprocessor
 from llama_index.core.query_engine import TransformQueryEngine
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
-from metro_agent.tools.knowledge_index_registry import (
-    KnowledgeIndexUnavailableError,
-    read_published_collection_name,
-)
-from metro_agent.tools.chunk_artifacts import (
-    ChunkManifestUnavailableError,
-    read_published_chunk_manifest,
-)
+from metro_agent.tools.knowledge_index_registry import KnowledgeIndexUnavailableError
+from metro_agent.knowledge.chroma_client import get_knowledge_read_proxy_client
+from metro_agent.knowledge.releases import ReleaseValidationError, read_release_pointer
 from metro_agent.llama_config import (
     ALPHA,
-    CHROMA_DB_DIR,
-    INDEX_REGISTRY_COLLECTION_NAME,
     SIMILARITY_CUTOFF,
     SIMILARITY_TOP_K,
     SPARSE_TOP_K,
@@ -33,7 +24,6 @@ _query_engine = None
 _query_engine_collection_name = None
 logger = logging.getLogger(__name__)
 DEBUG_HYDE = os.getenv("RAG_DEBUG_HYDE", "0") == "1"
-DEFAULT_CHUNK_ARTIFACT_ROOT = Path(__file__).resolve().parent.parent / "artifacts"
 
 
 class DebugHyDEQueryTransform(HyDEQueryTransform):
@@ -51,46 +41,25 @@ class DebugHyDEQueryTransform(HyDEQueryTransform):
 
 
 def get_chroma_client():
-    if not CHROMA_DB_DIR.exists():
-        raise KnowledgeIndexUnavailableError(
-            "知识库索引尚未构建，请先运行离线构建命令。"
-        )
-    return chromadb.PersistentClient(path=str(CHROMA_DB_DIR))
+    return get_knowledge_read_proxy_client()
 
 
 def resolve_published_collection_name(
     client=None,
-    *,
-    artifact_root: Path | str = DEFAULT_CHUNK_ARTIFACT_ROOT,
 ) -> str:
     if client is None:
         client = get_chroma_client()
-    collection_name = read_published_collection_name(
-        client,
-        INDEX_REGISTRY_COLLECTION_NAME,
-    )
-    index_build_id = _index_build_id(collection_name)
-    if index_build_id is None:
-        raise KnowledgeIndexUnavailableError(
-            "published index collection has no valid build identifier"
-        )
     try:
-        manifest = read_published_chunk_manifest(artifact_root, index_build_id)
-    except ChunkManifestUnavailableError as exc:
+        pointer = read_release_pointer(client)
+    except ReleaseValidationError as exc:
         raise KnowledgeIndexUnavailableError(
-            "published index chunk manifest is unavailable"
+            "知识库已发布版本不可用，请联系管理员。"
         ) from exc
-    lifecycle = manifest.get("lifecycle")
-    if (
-        not isinstance(lifecycle, dict)
-        or lifecycle.get("status") != "published"
-        or lifecycle.get("index_build_id") != index_build_id
-        or lifecycle.get("collection_name") != collection_name
-    ):
+    if pointer is None:
         raise KnowledgeIndexUnavailableError(
-            "published index chunk manifest does not match the registry collection"
+            "知识库索引尚未发布，请联系管理员。"
         )
-    return collection_name
+    return pointer.current_collection_name
 
 
 def get_published_collection(client, collection_name: str):
