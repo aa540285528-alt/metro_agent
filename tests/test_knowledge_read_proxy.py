@@ -3,12 +3,17 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+os.environ.setdefault("KNOWLEDGE_ARTIFACT_ROOT", "/var/lib/metro-agent/knowledge-artifacts")
+
+from metro_agent.knowledge.config import KnowledgeSettings
 from metro_agent.knowledge.releases import create_validated_release
+import metro_agent.knowledge_read_proxy as knowledge_read_proxy
 from metro_agent.knowledge_read_proxy import (
     DEFAULT_DATABASE,
     DEFAULT_TENANT,
@@ -299,6 +304,14 @@ def test_current_uuid_cannot_be_used_as_a_collection_metadata_name(
     )
 
     assert response["status"] == 403
+
+
+def test_uvicorn_module_app_uses_the_configured_artifact_root() -> None:
+    settings = KnowledgeSettings.from_environment()
+
+    assert settings.artifact_root is not None
+    assert knowledge_read_proxy.app._artifact_root == settings.artifact_root
+    assert "CHROMA_UPSTREAM" not in knowledge_read_proxy.__dict__
 
 
 def test_structured_logs_redact_body_headers_and_query(

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable, Protocol
 
+from metro_agent.knowledge.config import KnowledgeSettings
 from metro_agent.knowledge.releases import (
     INDEX_REGISTRY_COLLECTION_NAME,
     PUBLISHED_INDEX_ID,
@@ -273,6 +274,18 @@ def create_knowledge_read_proxy(
 ) -> KnowledgeReadProxy:
     """Create the ASGI application without exposing a configurable upstream URL."""
     return KnowledgeReadProxy(artifact_root, upstream=upstream)
+
+
+def _configured_artifact_root() -> Path:
+    artifact_root = KnowledgeSettings.from_environment().artifact_root
+    if artifact_root is None:
+        raise RuntimeError("KNOWLEDGE_ARTIFACT_ROOT must be configured for knowledge-read-proxy")
+    return artifact_root
+
+
+# Uvicorn imports this fixed deployment entry point.  The upstream remains the
+# internal Chroma service constant above and cannot be supplied by callers.
+app = create_knowledge_read_proxy(_configured_artifact_root())
 
 
 class _RouteDenied(RuntimeError):
