@@ -283,7 +283,7 @@ knowledge-read-proxy:
   networks: [knowledge_frontend, knowledge_backend]
 ```
 
-应用经 `knowledge-read-proxy` 使用 `HttpClient`，在使用缓存查询引擎前重新解析 registry，并移除本地 Chroma/artifact 读取。为 `DependencyReadinessChecker` 新增知识依赖。indexer 放进 `knowledge-admin` profile，知识源只读、artifact 可写，连 Redis/backend；app 只连 frontend。包装器采集 `$USER` 或 `$env:USERNAME`，拒绝其他子命令。
+应用经 `knowledge-read-proxy` 使用 `HttpClient`，在使用缓存查询引擎前重新解析 registry，并移除本地 Chroma/artifact 读取。为 `DependencyReadinessChecker` 新增知识依赖。indexer 放进 `knowledge-admin` profile，知识源只读、artifact 可写，连 Redis/backend；app 只连 frontend。POSIX 包装器验证有效 root、PowerShell 包装器验证 Windows Administrator，只把已验证身份写入本地日志；不向 CLI 传递身份。indexer 自行从可信 OS 身份生成不可由参数或环境覆盖的 `operator_identity`（Unix effective UID/pwd，Windows 系统身份 API）；容器内身份与宿主包装器日志分别保留，以避免伪造用户名跨边界。
 
 - [ ] **步骤 4：运行 GREEN 并提交**
 

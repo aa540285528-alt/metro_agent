@@ -42,7 +42,7 @@ app -> knowledge-read-proxy -> Chroma backend
 
 Compose 新增 `knowledge_chroma_data` 和 `knowledge_artifact_data` 命名卷。知识源是 `.env` 指向的宿主机目录，只读挂载进 indexer，绝不复制进镜像或 Git。应用不挂载知识源、Chroma 卷或 artifact 卷。
 
-`knowledge-indexer` 是不自动启动、无端口的一次性 Compose 服务，固定入口为 `python -m metro_agent.tools.knowledge_indexer`。其子命令只能是 `build-and-publish`、`status`、`rollback`、`verify`。PowerShell 与 POSIX 包装器只采集 OS 用户和主机名并调用该入口；所有路径和上游地址均来自受控环境，命令不接受任意路径或 URL 参数。
+`knowledge-indexer` 是不自动启动、无端口的一次性 Compose 服务，固定入口为 `python -m metro_agent.tools.knowledge_indexer`。其子命令只能是 `build-and-publish`、`status`、`rollback`、`verify`。POSIX 包装器验证有效 root，PowerShell 包装器验证 Windows Administrator；它们只在本地日志记录已验证身份，绝不把身份作为 CLI 参数传进容器。所有路径和上游地址均来自受控环境，命令不接受任意路径、URL 或操作者身份参数。
 
 ## 知识源与预检
 
@@ -70,7 +70,7 @@ Chroma registry 的单条 `published` 记录是唯一可见性开关，包含当
 
 回滚仅允许经过验证的前一 collection。它以单条 registry upsert 交换当前与前一版本，并保留所有 collection 和 artifact。首次发布没有前一版本时回滚失败，绝不清空当前版本。构建永久保留，不自动清理。
 
-每次操作以 UUID 记录在 `KNOWLEDGE_ARTIFACT_ROOT/operations/`：开始时原子创建 `<id>.started.json`，结束时创建不可覆盖的 `<id>.succeeded.json` 或 `<id>.failed.json`。记录 `operator_assertion`、主机、UTC 时间、操作、当前/前一 build ID、source revision、强制原因和错误类别。`operator_assertion` 是宿主机声明的操作者，用于受控运维追踪，不是密码学不可抵赖身份；只有开始记录代表中断并需人工核验。
+每次操作以 UUID 记录在 `KNOWLEDGE_ARTIFACT_ROOT/operations/`：开始时原子创建 `<id>.started.json`，结束时创建不可覆盖的 `<id>.succeeded.json` 或 `<id>.failed.json`。indexer 在内部从可信 OS 身份生成 `operator_identity`：Unix 使用 effective UID 对应的 `pwd` 记录，Windows 使用系统身份 API；CLI 和环境变量均不能覆盖它。事件还记录主机、UTC 时间、操作、当前/前一 build ID、source revision、强制原因和错误类别。容器事件记录的是容器内真实有效身份（通常为 root），而宿主包装器日志记录已验证的宿主管理员；这是避免将可伪造用户名跨边界传递的安全取舍。只有开始记录代表中断并需人工核验。
 
 ## 查询、保护与降级
 
