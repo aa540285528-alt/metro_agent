@@ -15,7 +15,7 @@ FastAPI
   |-- MySQL：验证账号、会话摘要、角色与审计
   |-- PostgreSQL：会话历史、Trace、工具调用、评测元数据
   |-- Redis：短期 checkpoint，键空间包含 auth:<id>
-  |-- Chroma chroma_db：已发布知识索引
+  |-- knowledge-read-proxy -> 远程 Chroma：受发布 registry 与 artifact 校验约束的已发布知识索引
   |-- Chroma memory_chroma_db：按 auth:<id> 隔离的用户长期记忆
   `-- 工具/模型提供商：受网络和凭据边界约束
 ```
@@ -28,8 +28,8 @@ FastAPI
 - PostgreSQL `metro_agent` 保存业务历史和本地可追责 Trace。会话 `owner_id` 与 Trace `user_id` 使用稳定主题 `auth:<id>`。
 - LangGraph checkpoint 使用 `auth:<id>:<thread_id>` 命名空间，避免不同用户提交相同 thread ID 时共享短期上下文。
 - Redis 不是权限判断依据；即使 checkpoint 存在，API 仍会在 Agent 开始前和写历史前复核 MySQL 会话。
-- `chroma_db` 保存共享的已发布知识索引，不承载用户身份映射；`memory_chroma_db` 保存用户长期记忆，metadata `user_id` 必须是 `auth:<id>`，检索以该字段隔离。
-- 旧自由字符串或裸数字 owner 不会自动与 MySQL ID 绑定，必须按 README 的同一份审批映射同步迁移 PostgreSQL 和 `memory_chroma_db`。迁移前同时备份两类 Chroma；记录影响数量和验证证据，长期记忆回滚使用快照或原 metadata，绝不改写 `chroma_db` 身份字段。
+- 共享知识索引位于远程 Chroma，由只读 `knowledge-read-proxy` 在每次转发前校验已发布 registry 指针与不可变 artifact；应用既不挂载也不读取本地知识 `chroma_db`，并且不能查询历史或草稿 collection。`memory_chroma_db` 保存用户长期记忆，metadata `user_id` 必须是 `auth:<id>`，检索以该字段隔离。
+- 旧自由字符串或裸数字 owner 不会自动与 MySQL ID 绑定，必须按 README 的同一份审批映射同步迁移 PostgreSQL 和 `memory_chroma_db`。迁移前备份 PostgreSQL、受发布治理的远程知识索引与长期记忆；记录影响数量和验证证据，长期记忆回滚使用快照或原 metadata，绝不改写已发布知识 collection 的身份字段。
 
 ## 运行组件
 
@@ -37,7 +37,7 @@ FastAPI
 - `metro_agent.graph`：LangGraph 工作流与 Agent 路由。
 - `metro_agent.tools`：RAG 与外部服务适配器；工具权限治理仍是独立交付项。
 - `metro_agent.observability`：本地 Trace、工具调用、时延、Token 和评测引用。
-- `metro_agent.storage`、`metro_agent.memory`：PostgreSQL 历史、Redis checkpoint、`chroma_db` 知识索引与 `memory_chroma_db` 长期记忆适配器。
+- `metro_agent.storage`、`metro_agent.memory`：PostgreSQL 历史、Redis checkpoint、经只读代理访问的远程已发布知识索引与 `memory_chroma_db` 长期记忆适配器。
 - `db-migrate`、`auth-migrate`：分别等待 PostgreSQL、MySQL healthy 后执行 Alembic；应用只在两个迁移成功后启动。
 
 Compose 网络不发布 MySQL、PostgreSQL 或 Redis 端口。应用仅发布到宿主机回环地址；WireMock 仅在 `mock` profile 下启动，认证链路不依赖公网资源。`app_backend`、`knowledge_frontend` 与 `knowledge_backend` 都是内部网络；应用经 `knowledge_frontend` 只访问只读知识代理，绝不加入 `knowledge_backend`。唯一非内部网络 `controlled_egress` 只连接 `app`，仅用于经部署侧出口策略批准的模型和外部服务；Chroma、知识代理、indexer 与数据服务均不加入它。

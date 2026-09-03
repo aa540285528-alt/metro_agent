@@ -4,7 +4,7 @@
 
 **目标：** 建成版本化、仅查询已发布版本的知识服务；由管理员 Compose 任务构建，通过只读代理提供查询，并支持经过验证的备份、恢复和回滚。
 
-**架构：** Chroma 是知识索引卷唯一持有者，仅通过 HTTP 访问。indexer 校验并用单条 registry upsert 发布 release descriptor；read-proxy 在转发应用请求前验证 descriptor，且只允许当前版本读取。Redis 串行化发布操作，不可变 artifact 事件保存审计证据。
+**架构：** Chroma 是知识索引卷唯一持有者，仅通过 HTTP 访问。indexer 校验并用单条 registry upsert 发布 release descriptor；read-proxy 在转发应用请求前验证 descriptor，且只允许当前版本读取。`app` 除 `app_backend` 外加入 `knowledge_frontend` 与 `controlled_egress`，绝不加入 `knowledge_backend`。Redis 串行化发布操作，不可变 artifact 事件保存审计证据。
 
 **技术栈：** Python 3.12、FastAPI/ASGI、httpx、chromadb 1.5.9、Redis、Docker Compose、pytest、Ruff、POSIX shell、PowerShell。
 
@@ -260,6 +260,7 @@ def test_readiness_is_503_when_no_valid_published_release(auth_api):
 
 def test_compose_keeps_app_off_the_chroma_backend():
     services = _compose()["services"]
+    assert {"knowledge_frontend", "controlled_egress"}.issubset(services["app"]["networks"])
     assert "knowledge_backend" not in services["app"]["networks"]
     assert "ports" not in services["chroma"]
 ```
@@ -283,7 +284,7 @@ knowledge-read-proxy:
   networks: [knowledge_frontend, knowledge_backend]
 ```
 
-应用经 `knowledge-read-proxy` 使用 `HttpClient`，在使用缓存查询引擎前重新解析 registry，并移除本地 Chroma/artifact 读取。为 `DependencyReadinessChecker` 新增知识依赖。indexer 放进 `knowledge-admin` profile，知识源只读、artifact 可写，且仅连 `knowledge_backend`；app 只连 frontend。POSIX 包装器验证有效 root，安全写入固定 `/var/log/metro-agent/knowledge-admin-audit.log`（目录 `0700`、文件 `0600`）；PowerShell 包装器验证 Windows Administrator，安全写入固定 ProgramData 的 `MetroAgent\knowledge-admin\audit.log`（Administrators/SYSTEM ACL）。两者只记录 UTC 时间、已验证身份、子命令和参数状态，不向 CLI 传递身份。indexer 自行从可信 OS 身份生成不可由参数或环境覆盖的 `operator_identity`（Unix effective UID/pwd，Windows 系统身份 API）；容器内身份与宿主包装器日志分别保留，以避免伪造用户名跨边界。
+应用经 `knowledge-read-proxy` 使用 `HttpClient`，在使用缓存查询引擎前重新解析 registry，并移除本地 Chroma/artifact 读取。为 `DependencyReadinessChecker` 新增知识依赖。indexer 放进 `knowledge-admin` profile，知识源只读、artifact 可写，且仅连 `knowledge_backend`；app 加入 `knowledge_frontend` 与 `controlled_egress`，仅经前者访问代理，绝不加入 `knowledge_backend`。POSIX 包装器验证有效 root，安全写入固定 `/var/log/metro-agent/knowledge-admin-audit.log`（目录 `0700`、文件 `0600`）；PowerShell 包装器验证 Windows Administrator，安全写入固定 ProgramData 的 `MetroAgent\knowledge-admin\audit.log`（Administrators/SYSTEM ACL）。两者只记录 UTC 时间、已验证身份、子命令和参数状态，不向 CLI 传递身份。indexer 自行从可信 OS 身份生成不可由参数或环境覆盖的 `operator_identity`（Unix effective UID/pwd，Windows 系统身份 API）；容器内身份与宿主包装器日志分别保留，以避免伪造用户名跨边界。
 
 - [ ] **步骤 4：运行 GREEN 并提交**
 

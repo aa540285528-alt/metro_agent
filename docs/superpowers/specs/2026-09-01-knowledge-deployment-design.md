@@ -29,7 +29,7 @@ app -> knowledge-read-proxy -> Chroma backend
 
 生产运行时完全禁止 `PersistentClient`。只有 `chroma` 服务挂载知识索引卷；`app` 与 `knowledge-indexer` 均使用 HTTP client。`chroma` 没有宿主机端口，仅处于内部 backend 网络。
 
-`app` 只加入 read-proxy 网络，既不能解析也不能连接 Chroma。`knowledge-indexer` 只连接 Chroma backend 网络且不暴露端口。`knowledge-read-proxy` 连接 Chroma backend 网络，并以只读方式挂载 artifact 卷；它在转发前验证 registry 指针与当前 validated artifact 摘要。代理是最小 Python ASGI 服务，固定上游 Chroma 地址并显式白名单 Chroma 1.5.9 所需的 identity、tenant、database、registry/collection 读取、count、`get` 与 `query` 路由；它只允许 registry collection 与 registry 当前指针所指 collection。所有 create、add、update、upsert、delete、fork、reset、`search`、PUT 与 DELETE 路由返回 `403`。代理路由白名单与版本锁同步测试。
+`app` 加入 `app_backend`、`knowledge_frontend` 与 `controlled_egress`：前者仅用于应用数据服务，`knowledge_frontend` 仅用于访问 read-proxy，`controlled_egress` 仅用于经部署侧出口策略批准的模型和外部服务；它既不能解析也不能连接 Chroma，且绝不加入 `knowledge_backend`。`knowledge-indexer` 只连接 Chroma backend 网络且不暴露端口。`knowledge-read-proxy` 连接 Chroma backend 网络，并以只读方式挂载 artifact 卷；它在转发前验证 registry 指针与当前 validated artifact 摘要。代理是最小 Python ASGI 服务，固定上游 Chroma 地址并显式白名单 Chroma 1.5.9 所需的 identity、tenant、database、registry/collection 读取、count、`get` 与 `query` 路由；它只允许 registry collection 与 registry 当前指针所指 collection。所有 create、add、update、upsert、delete、fork、reset、`search`、PUT 与 DELETE 路由返回 `403`。代理路由白名单与版本锁同步测试。
 
 ## 配置与持久化资源
 
