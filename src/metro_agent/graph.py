@@ -1,6 +1,7 @@
 from langgraph.graph import END, StateGraph
 
 from metro_agent.memory.long_term.memory_intent import is_memory_query
+from metro_agent.knowledge_intent import requires_published_knowledge
 from metro_agent.memory.long_term.memory_recall_nodes import memory_recall_node
 from metro_agent.observability.finalize_node import trace_finalize_node
 from metro_agent.observability.node_instrumentation import traced_node
@@ -13,6 +14,7 @@ from metro_agent.planning import (
 )
 from metro_agent.planning.safety_refusal_node import safety_refusal_plan_node
 from metro_agent.planning.diagnosis_plan_node import diagnosis_plan_node
+from metro_agent.planning.knowledge_plan_node import knowledge_plan_node
 from metro_agent.safety_policy import is_diagnosis_request, is_high_risk_safety_request
 from metro_agent.memory.short_term import (
     apply_compression_results,
@@ -38,6 +40,8 @@ def route_entry(state: MetroAgentState) -> str:
         return "diagnosis_plan_node"
     if is_memory_query(state["user_input"]):
         return "memory_recall_node"
+    if requires_published_knowledge(state["user_input"]):
+        return "knowledge_plan_node"
     return "planner_node"
 
 
@@ -70,6 +74,7 @@ def build_graph() -> StateGraph:
     graph.add_node("planner_node", planner_node)
     graph.add_node("safety_refusal_plan_node", safety_refusal_plan_node)
     graph.add_node("diagnosis_plan_node", diagnosis_plan_node)
+    graph.add_node("knowledge_plan_node", knowledge_plan_node)
     graph.add_node("plan_validator_node", plan_validator_node)
     graph.add_node("planning_scheduler_node", planning_scheduler_node)
     graph.add_node("planning_worker_node", planning_worker_node)
@@ -96,6 +101,7 @@ def build_graph() -> StateGraph:
             "planner_node": "planner_node",
             "safety_refusal_plan_node": "safety_refusal_plan_node",
             "diagnosis_plan_node": "diagnosis_plan_node",
+            "knowledge_plan_node": "knowledge_plan_node",
         },
     )
     graph.add_conditional_edges(

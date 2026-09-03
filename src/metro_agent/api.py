@@ -35,6 +35,7 @@ from metro_agent.auth.rate_limit import LoginRateLimiter
 from metro_agent.auth.service import AuthService
 from metro_agent.readiness import KnowledgeReadinessChecker, check_default_readiness
 from metro_agent.knowledge.releases import ReleaseValidationError
+from metro_agent.knowledge_intent import requires_published_knowledge
 from metro_agent.storage.history.service import ConversationNotFound
 from metro_agent.tools.knowledge_index_registry import KnowledgeIndexUnavailableError
 from metro_agent.observability.query_service import (
@@ -373,26 +374,27 @@ def create_app(
         _raw_session_token: Annotated[str | None, Depends(get_session_token)],
     ) -> StreamingResponse:
         owner_subject = auth_owner_subject(current_user.id)
-        try:
-            knowledge_preflight()
-        except (KnowledgeIndexUnavailableError, ReleaseValidationError) as exc:
-            logger.warning(
-                "operation=knowledge_preflight error_type=%s",
-                type(exc).__name__,
-            )
-
-            def unavailable_events() -> Generator[str, None, None]:
-                yield encode_sse(
-                    "error",
-                    {"message": "已发布知识库暂不可用，请稍后重试"},
+        if requires_published_knowledge(payload.message):
+            try:
+                knowledge_preflight()
+            except (KnowledgeIndexUnavailableError, ReleaseValidationError) as exc:
+                logger.warning(
+                    "operation=knowledge_preflight error_type=%s",
+                    type(exc).__name__,
                 )
-                yield encode_sse("done", {})
 
-            return StreamingResponse(
-                unavailable_events(),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-            )
+                def unavailable_events() -> Generator[str, None, None]:
+                    yield encode_sse(
+                        "error",
+                        {"message": "已发布知识库暂不可用，请稍后重试"},
+                    )
+                    yield encode_sse("done", {})
+
+                return StreamingResponse(
+                    unavailable_events(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
         try:
             request.app.state.history_service.claim_thread(
                 payload.thread_id,

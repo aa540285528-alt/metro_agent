@@ -581,6 +581,51 @@ def test_stream_returns_precise_message_when_published_knowledge_is_unavailable(
     assert auth_api.runner.calls == []
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "你好，介绍一下你自己",
+        "你记得我有哪些偏好？",
+        "设备登录密码是多少？",
+        "传输链路故障怎么排查？",
+    ],
+)
+def test_stream_skips_knowledge_preflight_for_routes_that_cannot_run_knowledge_agent(
+    auth_api,
+    message: str,
+) -> None:
+    assert login(auth_api.client, "operator", "CorrectHorseBattery2").status_code == 200
+    preflight_calls = 0
+
+    def unavailable_knowledge() -> None:
+        nonlocal preflight_calls
+        preflight_calls += 1
+        raise KnowledgeIndexUnavailableError("read proxy rejected current collection")
+
+    response_app = create_app(
+        graph_factory=lambda: object(),
+        history_service_factory=lambda: auth_api.history,
+        monitoring_service_factory=lambda: FakeMonitoringService(),
+        auth_service_factory=lambda: auth_api.service,
+        chat_runner=auth_api.runner,
+        knowledge_preflight=unavailable_knowledge,
+    )
+    with TestClient(response_app) as client:
+        assert login(client, "operator", "CorrectHorseBattery2").status_code == 200
+        response = client.post(
+            "/api/chat/stream",
+            json={"thread_id": f"non-knowledge-{preflight_calls}-{len(message)}", "message": message},
+        )
+
+    assert response.status_code == 200
+    assert "event: final" in response.text
+    assert "已发布知识库暂不可用，请稍后重试" not in response.text
+    assert preflight_calls == 0
+    assert len(auth_api.runner.calls) == 1
+    assert len(auth_api.history.claim_calls) == 1
+    assert len(auth_api.history.recorded_owners) == 1
+
+
 def test_stream_rechecks_session_before_calling_runner(
     auth_api, monkeypatch: pytest.MonkeyPatch
 ) -> None:
