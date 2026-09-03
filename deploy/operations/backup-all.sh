@@ -17,10 +17,49 @@ if [ -e "$BACKUP_DIR" ]; then
 fi
 mkdir -m 0700 "$BACKUP_DIR"
 
+LOCK_TOKEN_FILE="$BACKUP_DIR/.knowledge-publication-token"
+LOCK_RELEASE_FILE="$BACKUP_DIR/.knowledge-publication-release"
+LOCK_CONTAINER=$(docker compose --profile knowledge-admin run -d --no-deps \
+  -v "$BACKUP_DIR:/backup" knowledge-backup \
+  python deploy/operations/with-knowledge-publication-lock.py hold \
+  --token-file /backup/.knowledge-publication-token \
+  --release-file /backup/.knowledge-publication-release)
+
+release_publication_lock() {
+  status=$?
+  trap - EXIT HUP INT TERM
+  if [ -n "${LOCK_CONTAINER:-}" ]; then
+    : > "$LOCK_RELEASE_FILE"
+    if ! docker wait "$LOCK_CONTAINER" >/dev/null; then
+      echo "知识发布锁持有器异常退出" >&2
+      status=1
+    fi
+    docker rm "$LOCK_CONTAINER" >/dev/null 2>&1 || true
+  fi
+  rm -f "$LOCK_TOKEN_FILE" "$LOCK_RELEASE_FILE"
+  exit "$status"
+}
+trap release_publication_lock EXIT HUP INT TERM
+
+attempt=0
+until test -s "$LOCK_TOKEN_FILE"; do
+  attempt=$((attempt + 1))
+  test "$attempt" -lt 30 || { echo "未能获得知识发布锁" >&2; exit 3; }
+  sleep 1
+done
+LOCK_TOKEN=$(cat "$LOCK_TOKEN_FILE")
+verify_publication_lock() {
+  docker compose --profile knowledge-admin run --rm --no-deps knowledge-backup \
+    python deploy/operations/with-knowledge-publication-lock.py verify-token \
+    --token "$LOCK_TOKEN"
+}
+
+verify_publication_lock
 if docker compose ps --services --filter status=running | grep -qx 'knowledge-indexer'; then
   echo "知识 indexer 仍在运行，拒绝备份" >&2
   exit 3
 fi
+verify_publication_lock
 docker compose stop app knowledge-read-proxy chroma
 docker compose images app > "$BACKUP_DIR/image.txt"
 printf '%s\n' "$METRO_AGENT_IMAGE" > "$BACKUP_DIR/metro-agent-image.txt"
@@ -41,9 +80,10 @@ docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup" app python -c \
   "import tarfile; a=tarfile.open('/backup/memory-chroma.tar.gz','w:gz'); a.add('/var/lib/metro-agent/memory-chroma/current',arcname='current'); a.close()"
 # Keep one token-checked publication lease while archiving both roots.  Chroma
 # is already stopped, so this is an immutable release-unit snapshot.
+verify_publication_lock
 docker compose --profile knowledge-admin run --rm --no-deps -v "$BACKUP_DIR:/backup" \
-  knowledge-backup python deploy/operations/with-knowledge-publication-lock.py backup -- \
-  python -c "import tarfile; a=tarfile.open('/backup/knowledge-chroma.tar.gz','w:gz'); a.add('/chroma/chroma',arcname='chroma'); a.close(); b=tarfile.open('/backup/knowledge-artifacts.tar.gz','w:gz'); b.add('/var/lib/metro-agent/knowledge-artifacts',arcname='knowledge-artifacts'); b.close()"
+  knowledge-backup python -c \
+  "import tarfile; a=tarfile.open('/backup/knowledge-chroma.tar.gz','w:gz'); a.add('/chroma',arcname='chroma'); a.close(); b=tarfile.open('/backup/knowledge-artifacts.tar.gz','w:gz'); b.add('/var/lib/metro-agent/knowledge-artifacts',arcname='knowledge-artifacts'); b.close()"
 
 docker compose exec -T redis redis-cli SAVE > "$BACKUP_DIR/redis-save.txt"
 docker compose cp redis:/data/dump.rdb "$BACKUP_DIR/redis-dump.rdb"
@@ -58,6 +98,7 @@ docker compose run --rm --no-deps app python deploy/operations/chroma-owner-coun
   memory /var/lib/metro-agent/memory-chroma/current \
   >> "$BACKUP_DIR/owner-counts-before.txt"
 
+verify_publication_lock
 (cd "$BACKUP_DIR" && sha256sum \
   image.txt metro-agent-image.txt \
   alembic-current-postgres.txt alembic-current-mysql.txt \

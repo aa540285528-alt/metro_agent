@@ -11,7 +11,7 @@ export METRO_AGENT_IMAGE=registry.example/metro-agent@sha256:0123456789abcdef012
 deploy/operations/backup-all.sh /srv/metro-backups/pilot-20260826
 ```
 
-脚本先以同一 `knowledge:publication` token 校验锁预检，确认 `knowledge-indexer` 未在运行，并执行 `docker compose stop app knowledge-read-proxy chroma`。随后运行 `mysqldump --single-transaction`、`pg_dump`、长期记忆 Chroma 快照、完整 `knowledge_chroma_data` 与完整 `knowledge_artifact_data` 归档、Redis `SAVE`，并记录两个 Alembic revision、完整镜像 digest、owner-counts 与 `SHA256SUMS`。知识归档固定命名为 `knowledge-chroma.tar.gz`、`knowledge-artifacts.tar.gz`，二者缺一不可。脚本拒绝覆盖已有目录；任何命令失败都会停止，应用保持关闭。
+脚本在检查 `knowledge-indexer`、停止 `app` / `knowledge-read-proxy` / `chroma` **之前**取得一个可续租的 `knowledge:publication` token；同一 token 持续覆盖知识卷归档及 `SHA256SUMS` 写入，并在每个知识临界边界重新校验。随后运行 `mysqldump --single-transaction`、`pg_dump`、长期记忆 Chroma 快照、完整 `knowledge_chroma_data` 与完整 `knowledge_artifact_data` 归档、Redis `SAVE`，并记录两个 Alembic revision、完整镜像 digest、owner-counts 与 `SHA256SUMS`。知识归档固定命名为 `knowledge-chroma.tar.gz`、`knowledge-artifacts.tar.gz`，二者缺一不可。脚本拒绝覆盖已有目录；任何命令失败都会停止，应用保持关闭。
 
 release 和 artifact 是不可变审计证据，默认永久保留，**不自动清理**。归档文件的静态加密、密钥保管和保留期限由备份目标负责；脚本不替代备份介质加密。
 

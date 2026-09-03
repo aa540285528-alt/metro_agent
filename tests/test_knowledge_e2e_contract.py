@@ -16,6 +16,7 @@ def _compose() -> dict[str, object]:
 def test_backup_archives_complete_knowledge_release_unit_under_publication_lock() -> None:
     backup = (OPERATIONS / "backup-all.sh").read_text(encoding="utf-8")
     lock_helper = OPERATIONS / "with-knowledge-publication-lock.py"
+    compose = _compose()
 
     assert lock_helper.exists()
     assert "knowledge-chroma.tar.gz" in backup
@@ -24,6 +25,35 @@ def test_backup_archives_complete_knowledge_release_unit_under_publication_lock(
     assert "PublicationLock" in lock_helper.read_text(encoding="utf-8")
     assert "docker compose stop app knowledge-read-proxy chroma" in backup
     assert "knowledge-indexer" in backup
+    # The backup container sees the Chroma volume root at /chroma; the running
+    # Chroma service mounts that same root at /chroma/chroma.  Archive the
+    # former as the latter so restore extracts directly into the live mount.
+    assert compose["services"]["knowledge-backup"]["volumes"] == [
+        "knowledge_chroma_data:/chroma:ro",
+        "knowledge_artifact_data:/var/lib/metro-agent/knowledge-artifacts:ro",
+    ]
+    assert "a.add('/chroma',arcname='chroma')" in backup
+    assert "tar -C /chroma -xzf /backup/knowledge-chroma.tar.gz" in (
+        OPERATIONS / "restore-all.sh"
+    ).read_text(encoding="utf-8")
+
+
+def test_backup_holds_one_publication_token_before_stopping_knowledge_services() -> None:
+    backup = (OPERATIONS / "backup-all.sh").read_text(encoding="utf-8")
+    lock_helper = (OPERATIONS / "with-knowledge-publication-lock.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert " hold " in backup
+    assert "verify-token" in backup
+    assert backup.index("hold") < backup.index("knowledge-indexer")
+    assert backup.index("hold") < backup.index("docker compose stop app knowledge-read-proxy chroma")
+    assert backup.index("knowledge-chroma.tar.gz") < backup.index("SHA256SUMS")
+    assert "trap release_publication_lock EXIT HUP INT TERM" in backup
+    assert ": > \"$LOCK_RELEASE_FILE\"" in backup
+    assert "def hold_lock" in lock_helper
+    assert "def verify_token" in lock_helper
+    assert "PublicationLock" in lock_helper
 
 
 def test_restore_requires_complete_knowledge_release_and_verifies_it_before_app() -> None:
