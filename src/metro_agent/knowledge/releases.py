@@ -8,9 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from chromadb.errors import NotFoundError
-
-
 INDEX_REGISTRY_COLLECTION_NAME = "Metro_Knowledge_Index_Registry_v1"
 PUBLISHED_INDEX_ID = "published"
 PROVENANCE_TEXT_FIELDS = (
@@ -87,13 +84,13 @@ def publish_validated_release(client: Any, release: ValidatedRelease) -> Release
     """Atomically change visibility by upserting the one published record."""
     try:
         registry = client.get_collection(INDEX_REGISTRY_COLLECTION_NAME)
-    except NotFoundError:
+    except Exception as exc:
+        if not _is_chroma_not_found(exc):
+            raise ReleaseValidationError("published release pointer is unavailable") from exc
         try:
             registry = client.get_or_create_collection(INDEX_REGISTRY_COLLECTION_NAME)
-        except Exception as exc:
-            raise ReleaseValidationError("published release pointer is unavailable") from exc
-    except Exception as exc:
-        raise ReleaseValidationError("published release pointer is unavailable") from exc
+        except Exception as create_exc:
+            raise ReleaseValidationError("published release pointer is unavailable") from create_exc
     current = _read_pointer_from_registry(registry, required=False)
     pointer = ReleasePointer(
         current_build_id=release.build_id,
@@ -110,11 +107,11 @@ def publish_validated_release(client: Any, release: ValidatedRelease) -> Release
 def read_release_pointer(client: Any, *, required: bool = True) -> ReleasePointer | None:
     try:
         registry = client.get_collection(INDEX_REGISTRY_COLLECTION_NAME)
-    except NotFoundError as exc:
-        if not required:
-            return None
-        raise ReleaseValidationError("published release pointer is unavailable") from exc
     except Exception as exc:
+        if _is_chroma_not_found(exc):
+            if not required:
+                return None
+            raise ReleaseValidationError("published release pointer is unavailable") from exc
         raise ReleaseValidationError("published release pointer is unavailable") from exc
     return _read_pointer_from_registry(registry, required=required)
 
@@ -300,3 +297,12 @@ def _is_sha256(value: object) -> bool:
         and len(value) == 64
         and all(character in "0123456789abcdef" for character in value.lower())
     )
+
+
+def _is_chroma_not_found(exc: Exception) -> bool:
+    """Keep artifact-only consumers importable without a Chroma client installed."""
+    try:
+        from chromadb.errors import NotFoundError
+    except ImportError:
+        return False
+    return isinstance(exc, NotFoundError)
