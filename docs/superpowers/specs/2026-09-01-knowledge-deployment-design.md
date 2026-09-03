@@ -42,7 +42,7 @@ app -> knowledge-read-proxy -> Chroma backend
 
 Compose 新增 `knowledge_chroma_data` 和 `knowledge_artifact_data` 命名卷。知识源是 `.env` 指向的宿主机目录，只读挂载进 indexer，绝不复制进镜像或 Git。应用不挂载知识源、Chroma 卷或 artifact 卷。
 
-`knowledge-indexer` 是不自动启动、无端口的一次性 Compose 服务，固定入口为 `python -m metro_agent.tools.knowledge_indexer`。其子命令只能是 `build-and-publish`、`status`、`rollback`、`verify`。POSIX 包装器验证有效 root，PowerShell 包装器验证 Windows Administrator；它们只在本地日志记录已验证身份，绝不把身份作为 CLI 参数传进容器。所有路径和上游地址均来自受控环境，命令不接受任意路径、URL 或操作者身份参数。
+`knowledge-indexer` 是不自动启动、无端口的一次性 Compose 服务，固定入口为 `python -m metro_agent.tools.knowledge_indexer`。其子命令只能是 `build-and-publish`、`status`、`rollback`、`verify`。POSIX 包装器验证有效 root，并以 root 所有、目录 `0700`/文件 `0600` 写入固定 `/var/log/metro-agent/knowledge-admin-audit.log`；PowerShell 包装器验证 Windows Administrator，并以仅 Administrators 与 SYSTEM 可写的 ACL 写入固定 ProgramData 下的 `MetroAgent\knowledge-admin\audit.log`。两者记录 UTC 时间、已验证身份、子命令和无敏感值的参数状态，绝不把身份作为 CLI 参数传进容器。所有路径和上游地址均来自受控环境，命令不接受任意路径、URL 或操作者身份参数。
 
 ## 知识源与预检
 

@@ -18,6 +18,11 @@ def test_shell_wrapper_requires_effective_root_and_has_no_environment_admin_bypa
     assert "SUDO_USER" not in content
     assert "${USER" not in content
     assert "METRO_AGENT_KNOWLEDGE_ADMIN" not in content
+    assert "/var/log/metro-agent" in content
+    assert "install -d -m 0700" in content
+    assert "chmod 0600" in content
+    assert "date -u" in content
+    assert "parameter_status" in content
 
 
 def test_powershell_wrapper_uses_windows_administrator_role() -> None:
@@ -28,6 +33,11 @@ def test_powershell_wrapper_uses_windows_administrator_role() -> None:
     assert "$principal.Identity.Name" in content
     assert "$env:USERNAME" not in content
     assert "METRO_AGENT_KNOWLEDGE_ADMIN" not in content
+    assert "CommonApplicationData" in content
+    assert "Set-Acl" in content
+    assert "Add-Content" in content
+    assert "parameter_status" in content
+    assert "Write-Verbose" not in content
 
 
 def test_powershell_environment_variable_cannot_grant_admin_access() -> None:

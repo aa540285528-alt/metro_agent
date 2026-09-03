@@ -220,7 +220,7 @@ def test_compose_runs_knowledge_indexer_only_as_an_admin_profile() -> None:
     indexer = compose["services"]["knowledge-indexer"]
 
     assert indexer["profiles"] == ["knowledge-admin"]
-    assert indexer["networks"] == ["knowledge_backend", "app_backend"]
+    assert indexer["networks"] == ["knowledge_backend"]
     assert any(value.endswith(":ro") for value in indexer["volumes"])
     assert any(not value.endswith(":ro") for value in indexer["volumes"])
 

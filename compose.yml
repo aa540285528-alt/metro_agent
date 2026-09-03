@@ -196,7 +196,7 @@ services:
     volumes:
       - ${KNOWLEDGE_SOURCE_DIR:?请在 .env 中设置 KNOWLEDGE_SOURCE_DIR}:/knowledge/source:ro
       - knowledge_artifact_data:/var/lib/metro-agent/knowledge-artifacts
-    networks: [knowledge_backend, app_backend]
+    networks: [knowledge_backend]
     depends_on:
       redis:
         condition: service_healthy
