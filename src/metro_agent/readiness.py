@@ -20,12 +20,19 @@ class KnowledgeReadinessChecker:
         self._pointer_reader = pointer_reader
 
     def __call__(self) -> None:
-        client = self._client_factory()
-        pointer = self._pointer_reader(client)
-        if pointer is None:
-            raise ReleaseValidationError("published release pointer is unavailable")
-        if client.get_collection(pointer.current_collection_name).count() <= 0:
-            raise ReleaseValidationError("published knowledge collection is empty")
+        try:
+            client = self._client_factory()
+            pointer = self._pointer_reader(client)
+            if pointer is None:
+                raise ReleaseValidationError("published release pointer is unavailable")
+            if client.get_collection(pointer.current_collection_name).count() <= 0:
+                raise ReleaseValidationError("published knowledge collection is empty")
+        except ReleaseValidationError:
+            raise
+        except Exception as exc:
+            raise ReleaseValidationError(
+                "published knowledge service is unavailable"
+            ) from exc
 
 
 class DependencyReadinessChecker:

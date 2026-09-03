@@ -222,6 +222,7 @@ def auth_api(monkeypatch: pytest.MonkeyPatch):
         monitoring_service_factory=lambda: FakeMonitoringService(),
         auth_service_factory=lambda: auth_service,
         chat_runner=runner,
+        knowledge_preflight=lambda: None,
     )
     with TestClient(app) as client:
         yield SimpleNamespace(
@@ -561,7 +562,8 @@ def test_stream_returns_precise_message_when_published_knowledge_is_unavailable(
         history_service_factory=lambda: auth_api.history,
         monitoring_service_factory=lambda: FakeMonitoringService(),
         auth_service_factory=lambda: auth_api.service,
-        chat_runner=unavailable_knowledge,
+        chat_runner=auth_api.runner,
+        knowledge_preflight=unavailable_knowledge,
     )
     with TestClient(response_app) as client:
         assert login(client, "operator", "CorrectHorseBattery2").status_code == 200
@@ -573,7 +575,10 @@ def test_stream_returns_precise_message_when_published_knowledge_is_unavailable(
     assert "event: error" in response.text
     assert "已发布知识库暂不可用，请稍后重试" in response.text
     assert "event: final" not in response.text
+    assert auth_api.history.conversations == {}
+    assert auth_api.history.claim_calls == []
     assert auth_api.history.recorded_owners == []
+    assert auth_api.runner.calls == []
 
 
 def test_stream_rechecks_session_before_calling_runner(
