@@ -111,6 +111,10 @@ class KnowledgeReadProxy:
         status = 500
         error_type: str | None = None
         try:
+            if _is_statically_denied_route(method, path):
+                status, error_type = 403, "route_denied"
+                await self._send_error(send, status, request_id)
+                return
             body = await _read_body(receive)
             if len(body) > MAX_BODY_BYTES:
                 status, error_type = 413, "body_too_large"
@@ -328,6 +332,30 @@ def _collection_route(path: str) -> tuple[str | None, str | None]:
     if len(segments) == 2 and all(segments):
         return segments[0], segments[1]
     return None, None
+
+
+def _is_statically_denied_route(method: str, path: str) -> bool:
+    """Reject known writes before consuming an attacker-controlled request body."""
+    if method in {"PUT", "DELETE"}:
+        return True
+    if (method, path) in {
+        ("GET", f"{CHROMA_API_PREFIX}/auth/identity"),
+        ("GET", f"{CHROMA_API_PREFIX}/heartbeat"),
+        ("GET", f"{CHROMA_API_PREFIX}/tenants/{DEFAULT_TENANT}"),
+        ("GET", f"{CHROMA_API_PREFIX}/tenants/{DEFAULT_TENANT}/databases/{DEFAULT_DATABASE}"),
+    }:
+        return False
+    collection_ref, action = _collection_route(path)
+    if collection_ref is None:
+        return True
+    if (method, action) not in {
+        ("GET", None),
+        ("GET", "count"),
+        ("POST", "get"),
+        ("POST", "query"),
+    }:
+        return True
+    return collection_ref == INDEX_REGISTRY_COLLECTION_NAME and (method, action) != ("GET", None)
 
 
 def _collection_id(response: UpstreamResponse, expected_name: str) -> str:

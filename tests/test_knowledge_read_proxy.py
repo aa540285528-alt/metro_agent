@@ -1,31 +1,30 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import logging
 import os
+import subprocess
+import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
 
-os.environ.setdefault("KNOWLEDGE_ARTIFACT_ROOT", "/var/lib/metro-agent/knowledge-artifacts")
-
-from metro_agent.knowledge.config import KnowledgeSettings
 from metro_agent.knowledge.releases import create_validated_release
-import metro_agent.knowledge_read_proxy as knowledge_read_proxy
-from metro_agent.knowledge_read_proxy import (
-    DEFAULT_DATABASE,
-    DEFAULT_TENANT,
-    INDEX_REGISTRY_COLLECTION_NAME,
-    MAX_BODY_BYTES,
-    UpstreamResponse,
-    create_knowledge_read_proxy,
-)
+
+
+DEFAULT_TENANT = "default_tenant"
+DEFAULT_DATABASE = "default_database"
+INDEX_REGISTRY_COLLECTION_NAME = "Metro_Knowledge_Index_Registry_v1"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class RecordingUpstream:
-    def __init__(self, release_sha: str, collection_name: str) -> None:
+    def __init__(self, proxy_module: ModuleType, release_sha: str, collection_name: str) -> None:
+        self.proxy_module = proxy_module
         self.release_sha = release_sha
         self.collection_name = collection_name
         self.requests: list[tuple[str, str, bytes]] = []
@@ -33,7 +32,7 @@ class RecordingUpstream:
 
     async def request(
         self, method: str, path: str, body: bytes, headers: list[tuple[bytes, bytes]]
-    ) -> UpstreamResponse:
+    ) -> Any:
         del headers
         self.requests.append((method, path, body))
         if self.error is not None:
@@ -42,9 +41,13 @@ class RecordingUpstream:
             f"/api/v2/tenants/{DEFAULT_TENANT}/databases/{DEFAULT_DATABASE}/collections"
         )
         if path == f"{collection_base}/{INDEX_REGISTRY_COLLECTION_NAME}":
-            return _json_response({"id": "registry-uuid", "name": INDEX_REGISTRY_COLLECTION_NAME})
+            return _json_response(
+                self.proxy_module,
+                {"id": "registry-uuid", "name": INDEX_REGISTRY_COLLECTION_NAME},
+            )
         if path == f"{collection_base}/registry-uuid/get":
             return _json_response(
+                self.proxy_module,
                 {
                     "ids": ["published"],
                     "metadatas": [
@@ -57,12 +60,14 @@ class RecordingUpstream:
                 }
             )
         if path == f"{collection_base}/{self.collection_name}":
-            return _json_response({"id": "current-uuid", "name": self.collection_name})
-        return _json_response({"forwarded": path}, status=200)
+            return _json_response(
+                self.proxy_module, {"id": "current-uuid", "name": self.collection_name}
+            )
+        return _json_response(self.proxy_module, {"forwarded": path}, status=200)
 
 
-def _json_response(value: object, status: int = 200) -> UpstreamResponse:
-    return UpstreamResponse(
+def _json_response(proxy_module: ModuleType, value: object, status: int = 200) -> Any:
+    return proxy_module.UpstreamResponse(
         status=status,
         headers=[(b"content-type", b"application/json")],
         body=json.dumps(value).encode("utf-8"),
@@ -89,10 +94,17 @@ def _descriptor() -> dict[str, object]:
 
 
 @pytest.fixture
-def proxy(tmp_path: Path) -> tuple[Any, RecordingUpstream]:
+def proxy_module(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ModuleType:
+    monkeypatch.setenv("KNOWLEDGE_ARTIFACT_ROOT", str(tmp_path / "module-artifacts"))
+    sys.modules.pop("metro_agent.knowledge_read_proxy", None)
+    return importlib.import_module("metro_agent.knowledge_read_proxy")
+
+
+@pytest.fixture
+def proxy(proxy_module: ModuleType, tmp_path: Path) -> tuple[Any, RecordingUpstream]:
     release = create_validated_release(tmp_path, _descriptor())
-    upstream = RecordingUpstream(release.sha256, release.collection_name)
-    return create_knowledge_read_proxy(tmp_path, upstream=upstream), upstream
+    upstream = RecordingUpstream(proxy_module, release.sha256, release.collection_name)
+    return proxy_module.create_knowledge_read_proxy(tmp_path, upstream=upstream), upstream
 
 
 @pytest.mark.parametrize(
@@ -214,10 +226,12 @@ def test_current_collection_is_resolved_per_request_and_historical_uuid_is_rejec
     ]
 
 
-def test_stale_descriptor_or_pointer_is_unavailable_and_never_forwards(tmp_path: Path) -> None:
+def test_stale_descriptor_or_pointer_is_unavailable_and_never_forwards(
+    proxy_module: ModuleType, tmp_path: Path
+) -> None:
     release = create_validated_release(tmp_path, _descriptor())
-    upstream = RecordingUpstream("f" * 64, release.collection_name)
-    app = create_knowledge_read_proxy(tmp_path, upstream=upstream)
+    upstream = RecordingUpstream(proxy_module, "f" * 64, release.collection_name)
+    app = proxy_module.create_knowledge_read_proxy(tmp_path, upstream=upstream)
 
     response = _request(
         app,
@@ -230,10 +244,14 @@ def test_stale_descriptor_or_pointer_is_unavailable_and_never_forwards(tmp_path:
     assert all(not request[1].endswith("/query") for request in upstream.requests)
 
 
-def test_body_limit_is_enforced_before_upstream(proxy: tuple[Any, RecordingUpstream]) -> None:
+def test_body_limit_is_enforced_before_upstream(
+    proxy: tuple[Any, RecordingUpstream], proxy_module: ModuleType
+) -> None:
     app, upstream = proxy
 
-    response = _request(app, "GET", "/api/v2/heartbeat", b"x" * (MAX_BODY_BYTES + 1))
+    response = _request(
+        app, "GET", "/api/v2/heartbeat", b"x" * (proxy_module.MAX_BODY_BYTES + 1)
+    )
 
     assert response["status"] == 413
     assert upstream.requests == []
@@ -306,12 +324,74 @@ def test_current_uuid_cannot_be_used_as_a_collection_metadata_name(
     assert response["status"] == 403
 
 
-def test_uvicorn_module_app_uses_the_configured_artifact_root() -> None:
-    settings = KnowledgeSettings.from_environment()
+def test_uvicorn_module_app_requires_an_artifact_root_and_uses_a_configured_one(
+    tmp_path: Path,
+) -> None:
+    command = [
+        sys.executable,
+        "-c",
+        "import metro_agent.knowledge_read_proxy",
+    ]
+    environment = os.environ.copy()
+    environment.pop("KNOWLEDGE_ARTIFACT_ROOT", None)
+    environment["PYTHONPATH"] = str(PROJECT_ROOT / "src") + os.pathsep + environment.get("PYTHONPATH", "")
 
-    assert settings.artifact_root is not None
-    assert knowledge_read_proxy.app._artifact_root == settings.artifact_root
-    assert "CHROMA_UPSTREAM" not in knowledge_read_proxy.__dict__
+    unavailable = subprocess.run(command, capture_output=True, text=True, env=environment)
+
+    assert unavailable.returncode != 0
+    assert "KNOWLEDGE_ARTIFACT_ROOT must be configured" in unavailable.stderr
+    artifact_root = tmp_path / "configured-artifacts"
+    environment["KNOWLEDGE_ARTIFACT_ROOT"] = str(artifact_root)
+    available = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from metro_agent.knowledge_read_proxy import app; print(app._artifact_root)",
+        ],
+        capture_output=True,
+        text=True,
+        env=environment,
+        check=False,
+    )
+
+    assert available.returncode == 0
+    assert available.stdout.strip() == str(artifact_root)
+
+
+def test_static_write_rejection_does_not_read_a_large_body(
+    proxy: tuple[Any, RecordingUpstream],
+) -> None:
+    app, upstream = proxy
+
+    async def invoke() -> list[dict[str, Any]]:
+        sent: list[dict[str, Any]] = []
+
+        async def receive() -> dict[str, object]:
+            raise AssertionError("a statically denied route must not read its body")
+
+        async def send(message: dict[str, Any]) -> None:
+            sent.append(message)
+
+        await app(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": (
+                    "/api/v2/tenants/default_tenant/databases/default_database/"
+                    "collections/current-uuid/upsert"
+                ),
+                "query_string": b"",
+                "headers": [(b"content-length", b"1048577")],
+            },
+            receive,
+            send,
+        )
+        return sent
+
+    messages = asyncio.run(invoke())
+
+    assert next(message for message in messages if message["type"] == "http.response.start")["status"] == 403
+    assert upstream.requests == []
 
 
 def test_structured_logs_redact_body_headers_and_query(
