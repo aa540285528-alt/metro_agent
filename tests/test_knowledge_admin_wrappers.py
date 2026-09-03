@@ -66,7 +66,7 @@ def test_wrappers_whitelist_force_rebuild_and_reject_operator_override() -> None
         assert reason in shell
         assert reason in powershell
     for content in (shell, powershell):
-        assert "--operator-assertion" in content
         assert "unknown or duplicate" in content
         assert '"$@"' not in content
         assert "$IndexerArguments" not in content
+        assert "--operator-assertion" not in content

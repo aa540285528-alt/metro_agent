@@ -18,6 +18,7 @@ if ($Command -notin $allowed) {
 }
 
 $operator = $principal.Identity.Name
+Write-Verbose "knowledge administrator: $operator"
 $dockerArguments = @("compose", "--profile", "knowledge-admin", "run", "--rm", "knowledge-indexer", $Command)
 $forceReasons = @("indexer-upgrade", "embedding-model-change", "reranker-model-change", "chunker-change", "recovery")
 if ($Command -eq "build-and-publish") {
@@ -28,14 +29,11 @@ if ($Command -eq "build-and-publish") {
     } else {
         throw "unknown or duplicate knowledge administration parameter"
     }
-    $dockerArguments += @("--operator-assertion", $operator)
     if ($null -ne $forceReason) {
         $dockerArguments += @("--force-rebuild", $forceReason)
     }
 } elseif ($Arguments.Count -ne 0) {
     throw "unknown or duplicate knowledge administration parameter"
-} elseif ($Command -eq "rollback") {
-    $dockerArguments += @("--operator-assertion", $operator)
 }
 & docker @dockerArguments
 exit $LASTEXITCODE

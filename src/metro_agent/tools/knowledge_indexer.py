@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from metro_agent.knowledge.chroma_client import get_chroma_client
 from metro_agent.knowledge.config import KnowledgeSettings, require_knowledge_source_root
+from metro_agent.knowledge.operator_identity import trusted_operator_identity
 from metro_agent.knowledge.publication_lock import PublicationLock
 from metro_agent.knowledge.releases import (
     ReleaseValidationError,
@@ -48,11 +49,9 @@ class KnowledgeIndexerError(RuntimeError):
 class OperationEvents:
     """Append-only lifecycle evidence for a single operator action."""
 
-    def __init__(self, artifact_root: Path | str, *, operator_assertion: str, host: str | None = None) -> None:
-        if not operator_assertion or not operator_assertion.strip():
-            raise ValueError("operator_assertion is required")
+    def __init__(self, artifact_root: Path | str, *, host: str | None = None) -> None:
         self._root = Path(artifact_root) / "operations"
-        self._operator = operator_assertion
+        self._operator = trusted_operator_identity()
         self._host = host or platform.node()
         self._contexts: dict[str, dict[str, Any]] = {}
 
@@ -140,7 +139,7 @@ class OperationEvents:
         path = self._root / f"{operation_id}.{state}.json"
         payload = {
             "operation_id": operation_id,
-            "operator_assertion": self._operator,
+            "operator_identity": self._operator,
             "host": self._host,
             "timestamp_utc": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
             **detail,
@@ -160,7 +159,6 @@ class KnowledgeIndexer:
     def build_and_publish(
         self,
         *,
-        operator_assertion: str,
         force_reason: str | None = None,
     ) -> dict[str, str]:
         if force_reason is not None and force_reason not in FORCE_REBUILD_REASONS:
@@ -173,7 +171,7 @@ class KnowledgeIndexer:
         if force_reason is None and self._matches_current(current, source_sha, provenance):
             return {"status": "no-op", "build_id": current_pointer.current_build_id if current_pointer else ""}
 
-        events = OperationEvents(self.artifact_root, operator_assertion=operator_assertion)
+        events = OperationEvents(self.artifact_root)
         operation_id: str | None = None
         build_id: str | None = None
         try:
@@ -240,8 +238,8 @@ class KnowledgeIndexer:
         self._ensure_collection_nonempty(pointer.current_collection_name)
         return {"status": "verified", "build_id": pointer.current_build_id}
 
-    def rollback(self, *, operator_assertion: str) -> dict[str, str]:
-        events = OperationEvents(self.artifact_root, operator_assertion=operator_assertion)
+    def rollback(self) -> dict[str, str]:
+        events = OperationEvents(self.artifact_root)
         before = None
         operation_id: str | None = None
         try:
@@ -366,12 +364,9 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build and govern the published knowledge index.")
     commands = parser.add_subparsers(dest="command", required=True)
     build = commands.add_parser("build-and-publish")
-    build.add_argument("--operator-assertion", default=os.getenv("USER") or os.getenv("USERNAME") or "unknown")
     build.add_argument("--force-rebuild", choices=FORCE_REBUILD_REASONS)
     for name in ("status", "rollback", "verify"):
-        command = commands.add_parser(name)
-        if name == "rollback":
-            command.add_argument("--operator-assertion", default=os.getenv("USER") or os.getenv("USERNAME") or "unknown")
+        commands.add_parser(name)
     return parser.parse_args(arguments)
 
 
@@ -394,11 +389,11 @@ def main(arguments: list[str] | None = None) -> int:
     indexer = _default_indexer()
     try:
         if args.command == "build-and-publish":
-            result = indexer.build_and_publish(operator_assertion=args.operator_assertion, force_reason=args.force_rebuild)
+            result = indexer.build_and_publish(force_reason=args.force_rebuild)
         elif args.command == "status":
             result = indexer.status()
         elif args.command == "rollback":
-            result = indexer.rollback(operator_assertion=args.operator_assertion)
+            result = indexer.rollback()
         else:
             result = indexer.verify()
     except (KnowledgeIndexerError, ReleaseValidationError) as exc:

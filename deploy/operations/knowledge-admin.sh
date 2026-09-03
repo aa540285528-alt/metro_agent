@@ -8,6 +8,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 operator="$(id -un)"
+printf '%s\n' "knowledge administrator: $operator" >&2
 command="${1:-}"
 case "$command" in
   build-and-publish|rollback|verify|status) ;;
@@ -38,10 +39,10 @@ case "$command" in
     fi
     if [ -n "$force_reason" ]; then
       exec docker compose --profile knowledge-admin run --rm knowledge-indexer \
-        build-and-publish --operator-assertion "$operator" --force-rebuild "$force_reason"
+        build-and-publish --force-rebuild "$force_reason"
     fi
     exec docker compose --profile knowledge-admin run --rm knowledge-indexer \
-      build-and-publish --operator-assertion "$operator"
+      build-and-publish
     ;;
   rollback)
     if [ "$#" -ne 0 ]; then
@@ -49,7 +50,7 @@ case "$command" in
       exit 64
     fi
     exec docker compose --profile knowledge-admin run --rm knowledge-indexer \
-      rollback --operator-assertion "$operator"
+      rollback
     ;;
   verify|status)
     if [ "$#" -ne 0 ]; then

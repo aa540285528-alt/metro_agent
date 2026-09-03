@@ -28,10 +28,20 @@ def test_cli_exposes_only_governed_commands_and_fixed_force_reasons() -> None:
     }
     with pytest.raises(SystemExit):
         parse_args(["build-and-publish", "--force-rebuild", "not-approved"])
+    with pytest.raises(SystemExit):
+        parse_args(["build-and-publish", "--operator-assertion", "forged"])
+    with pytest.raises(SystemExit):
+        parse_args(["rollback", "--operator-assertion", "forged"])
 
 
-def test_operation_events_are_uuid_immutable_and_capture_operator_context(tmp_path: Path) -> None:
-    events = OperationEvents(tmp_path, operator_assertion="alice", host="node-a")
+def test_operation_events_are_uuid_immutable_and_capture_trusted_operator_context(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        "metro_agent.tools.knowledge_indexer.trusted_operator_identity",
+        lambda: "uid:root",
+    )
+    events = OperationEvents(tmp_path, host="node-a")
     operation_id = events.started(
         operation="build-and-publish",
         build_id="build-a",
@@ -43,7 +53,7 @@ def test_operation_events_are_uuid_immutable_and_capture_operator_context(tmp_pa
 
     started = json.loads((tmp_path / "operations" / f"{operation_id}.started.json").read_text())
     succeeded = json.loads((tmp_path / "operations" / f"{operation_id}.succeeded.json").read_text())
-    assert started["operator_assertion"] == "alice"
+    assert started["operator_identity"] == "uid:root"
     assert started["host"] == "node-a"
     assert started["timestamp_utc"].endswith("Z")
     assert succeeded["operation"] == "build-and-publish"
@@ -51,8 +61,12 @@ def test_operation_events_are_uuid_immutable_and_capture_operator_context(tmp_pa
         events.succeeded(operation_id, operation="build-and-publish", build_id="build-a")
 
 
-def test_each_operation_event_keeps_the_full_audit_context(tmp_path: Path) -> None:
-    events = OperationEvents(tmp_path, operator_assertion="alice", host="node-a")
+def test_each_operation_event_keeps_the_full_audit_context(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "metro_agent.tools.knowledge_indexer.trusted_operator_identity",
+        lambda: "uid:root",
+    )
+    events = OperationEvents(tmp_path, host="node-a")
     operation_id = events.started(
         operation="build-and-publish",
         build_id="candidate",
@@ -82,8 +96,12 @@ def test_each_operation_event_keeps_the_full_audit_context(tmp_path: Path) -> No
     assert records["failed"]["error_category"] == "RuntimeError"
 
 
-def test_terminal_event_updates_the_current_and_previous_release_ids(tmp_path: Path) -> None:
-    events = OperationEvents(tmp_path, operator_assertion="alice", host="node-a")
+def test_terminal_event_updates_the_current_and_previous_release_ids(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "metro_agent.tools.knowledge_indexer.trusted_operator_identity",
+        lambda: "uid:root",
+    )
+    events = OperationEvents(tmp_path, host="node-a")
     operation_id = events.started(
         operation="rollback",
         build_id="old-current",
@@ -141,7 +159,7 @@ def test_build_noops_when_source_and_provenance_match_current(monkeypatch, tmp_p
         lambda *_args, **_kwargs: _Pointer(),
     )
 
-    assert indexer.build_and_publish(operator_assertion="alice") == {"status": "no-op", "build_id": "current"}
+    assert indexer.build_and_publish() == {"status": "no-op", "build_id": "current"}
 
 
 def test_fresh_deployment_build_creates_the_missing_registry_and_publishes(monkeypatch, tmp_path: Path) -> None:
@@ -177,7 +195,7 @@ def test_fresh_deployment_build_creates_the_missing_registry_and_publishes(monke
     monkeypatch.setattr(indexer, "_run_smoke_queries", lambda _source, _name: None)
     monkeypatch.setattr("metro_agent.tools.knowledge_indexer.PublicationLock", _Lock)
 
-    assert indexer.build_and_publish(operator_assertion="alice") == {"status": "published", "build_id": "first"}
+    assert indexer.build_and_publish() == {"status": "published", "build_id": "first"}
     assert len(client.registry.upserts) == 1
 
 
@@ -257,7 +275,7 @@ def test_rollback_acquires_lock_before_reading_pointer_or_writing_started_event(
     monkeypatch.setattr("metro_agent.tools.knowledge_indexer.read_release_pointer", read_pointer)
     monkeypatch.setattr("metro_agent.tools.knowledge_indexer.rollback_release_pointer", rollback)
 
-    assert indexer.rollback(operator_assertion="alice") == {"status": "rolled-back", "build_id": "old-current"}
+    assert indexer.rollback() == {"status": "rolled-back", "build_id": "old-current"}
     assert trace == ["acquire", "read", "started", "rollback", "assert", "release", "succeeded"]
 
 
@@ -277,7 +295,7 @@ def test_recheck_after_lock_returns_noop_before_creating_operation_events(monkey
     )
     monkeypatch.setattr("metro_agent.tools.knowledge_indexer.PublicationLock", _Lock)
 
-    assert indexer.build_and_publish(operator_assertion="alice") == {"status": "no-op", "build_id": "current"}
+    assert indexer.build_and_publish() == {"status": "no-op", "build_id": "current"}
     assert not (tmp_path / "operations").exists()
 
 
