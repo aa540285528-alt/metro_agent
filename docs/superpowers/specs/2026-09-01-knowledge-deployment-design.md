@@ -27,7 +27,7 @@ app -> knowledge-read-proxy -> Chroma backend
 
 使用精确固定的 `chromadb==1.5.9` 客户端和 `chromadb/chroma:1.5.9` server 镜像；AMD64 部署与 CI 固定经验证的 manifest digest，其他平台固定其对应 digest，严禁使用 `latest`。任何版本升级都必须重跑持续查询、发布、重启、回滚与代理拒绝写入演练。
 
-生产运行时完全禁止 `PersistentClient`。只有 `chroma` 服务挂载知识索引卷；`app` 与 `knowledge-indexer` 均使用 HTTP client。`chroma` 没有宿主机端口，仅处于内部 backend 网络。
+生产运行时完全禁止 `PersistentClient`。只有 `chroma` 服务挂载知识索引卷；`app` 的 RAG HTTP client 固定访问 `knowledge-read-proxy`，`knowledge-indexer` 是唯一读取 `CHROMA_HOST`/`CHROMA_PORT` 并在内部网络直接访问 Chroma 的 HTTP client。`knowledge-read-proxy` 的 Chroma 上游固定为内部地址，不读取这两个环境变量。`chroma` 没有宿主机端口，仅处于内部 backend 网络。
 
 `app` 加入 `app_backend`、`knowledge_frontend` 与 `controlled_egress`：前者仅用于应用数据服务，`knowledge_frontend` 仅用于访问 read-proxy，`controlled_egress` 仅用于经部署侧出口策略批准的模型和外部服务；它既不能解析也不能连接 Chroma，且绝不加入 `knowledge_backend`。`knowledge-indexer` 只连接 Chroma backend 网络且不暴露端口。`knowledge-read-proxy` 连接 Chroma backend 网络，并以只读方式挂载 artifact 卷；它在转发前验证 registry 指针与当前 validated artifact 摘要。代理是最小 Python ASGI 服务，固定上游 Chroma 地址并显式白名单 Chroma 1.5.9 所需的 identity、tenant、database、registry/collection 读取、count、`get` 与 `query` 路由；它只允许 registry collection 与 registry 当前指针所指 collection。所有 create、add、update、upsert、delete、fork、reset、`search`、PUT 与 DELETE 路由返回 `403`。代理路由白名单与版本锁同步测试。
 
@@ -36,13 +36,13 @@ app -> knowledge-read-proxy -> Chroma backend
 | 配置 | 容器内路径或地址 | 使用方 |
 | --- | --- | --- |
 | `KNOWLEDGE_PATH` | indexer 的 `/knowledge/source` | indexer 只读 |
-| `CHROMA_HOST`/`CHROMA_PORT` | 内部 `chroma:8000` | proxy、indexer |
+| `CHROMA_HOST`/`CHROMA_PORT` | indexer 到内部 `chroma:8000` 的地址 | 仅 indexer；proxy 上游固定且不读取 |
 | `CHROMA_DB_DIR` | chroma 的 `/chroma/chroma` | 仅 chroma 服务读写 |
 | `KNOWLEDGE_ARTIFACT_ROOT` | `/var/lib/metro-agent/knowledge-artifacts` | indexer 读写；read-proxy、操作/备份服务只读 |
 
 Compose 新增 `knowledge_chroma_data` 和 `knowledge_artifact_data` 命名卷。知识源是 `.env` 指向的宿主机目录，只读挂载进 indexer，绝不复制进镜像或 Git。应用不挂载知识源、Chroma 卷或 artifact 卷。
 
-`knowledge-indexer` 是不自动启动、无端口的一次性 Compose 服务，固定入口为 `python -m metro_agent.tools.knowledge_indexer`。其子命令只能是 `build-and-publish`、`status`、`rollback`、`verify`。POSIX 包装器验证有效 root，并以 root 所有、目录 `0700`/文件 `0600` 写入固定 `/var/log/metro-agent/knowledge-admin-audit.log`；PowerShell 包装器验证 Windows Administrator，并以仅 Administrators 与 SYSTEM 可写的 ACL 写入固定 ProgramData 下的 `MetroAgent\knowledge-admin\audit.log`。两者记录 UTC 时间、已验证身份、子命令和无敏感值的参数状态，绝不把身份作为 CLI 参数传进容器。所有路径和上游地址均来自受控环境，命令不接受任意路径、URL 或操作者身份参数。
+`knowledge-indexer` 是不自动启动、无端口的一次性 Compose 服务，固定入口为 `python -m metro_agent.tools.knowledge_indexer`。其子命令只能是 `build-and-publish`、`status`、`rollback`、`verify`。POSIX 包装器验证有效 root，并以 root 所有、目录 `0700`/文件 `0600` 写入固定 `/var/log/metro-agent/knowledge-admin-audit.log`；PowerShell 包装器验证 Windows Administrator，并以仅 Administrators 与 SYSTEM 可写的 ACL 写入固定 ProgramData 下的 `MetroAgent\knowledge-admin\audit.log`。两者记录 UTC 时间、已验证身份、子命令和无敏感值的参数状态，绝不把身份作为 CLI 参数传进容器。除 read-proxy 的固定 Chroma 上游外，所有路径和 indexer 上游地址均来自受控环境；命令不接受任意路径、URL 或操作者身份参数。
 
 Windows 的包装器不会在运行时自动创建审计目录或日志文件：通用 .NET 路径创建无法原子保证整条 ProgramData 祖先链不经过 reparse point。部署安装程序必须先以管理员权限创建固定目录和日志、设置仅 Administrators/SYSTEM ACL；任一组件缺失、祖先或目标为 reparse point，或 ACL 不符合要求时包装器拒绝执行，且不启动 indexer。
 
