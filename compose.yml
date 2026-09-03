@@ -26,7 +26,7 @@ services:
       - mysql_ca:/etc/mysql/ca:ro
       - "${MODEL_DIR:?请在 .env 中设置 MODEL_DIR}:/models:ro"
       - memory_chroma_data:/var/lib/metro-agent/memory-chroma
-    networks: [knowledge_frontend, app_backend]
+    networks: [knowledge_frontend, app_backend, controlled_egress]
     depends_on:
       db-migrate:
         condition: service_completed_successfully
@@ -230,3 +230,5 @@ networks:
     internal: true
   knowledge_backend:
     internal: true
+  controlled_egress:
+    internal: false

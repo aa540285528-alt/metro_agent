@@ -1,13 +1,15 @@
-#!/usr/bin/env sh
+#!/bin/sh
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
 # Run governed knowledge publication commands as an effective root operator.
 set -eu
 
-if [ "$(id -u)" -ne 0 ]; then
+if [ "$(/usr/bin/id -u)" -ne 0 ]; then
   echo "knowledge administration requires an effective root operator" >&2
   exit 77
 fi
 
-operator="$(id -un)"
+operator="$(/usr/bin/id -un)"
 command="${1:-}"
 case "$command" in
   build-and-publish|rollback|verify|status) ;;

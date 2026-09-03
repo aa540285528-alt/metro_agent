@@ -44,6 +44,8 @@ Compose 新增 `knowledge_chroma_data` 和 `knowledge_artifact_data` 命名卷�
 
 `knowledge-indexer` 是不自动启动、无端口的一次性 Compose 服务，固定入口为 `python -m metro_agent.tools.knowledge_indexer`。其子命令只能是 `build-and-publish`、`status`、`rollback`、`verify`。POSIX 包装器验证有效 root，并以 root 所有、目录 `0700`/文件 `0600` 写入固定 `/var/log/metro-agent/knowledge-admin-audit.log`；PowerShell 包装器验证 Windows Administrator，并以仅 Administrators 与 SYSTEM 可写的 ACL 写入固定 ProgramData 下的 `MetroAgent\knowledge-admin\audit.log`。两者记录 UTC 时间、已验证身份、子命令和无敏感值的参数状态，绝不把身份作为 CLI 参数传进容器。所有路径和上游地址均来自受控环境，命令不接受任意路径、URL 或操作者身份参数。
 
+Windows 的包装器不会在运行时自动创建审计目录或日志文件：通用 .NET 路径创建无法原子保证整条 ProgramData 祖先链不经过 reparse point。部署安装程序必须先以管理员权限创建固定目录和日志、设置仅 Administrators/SYSTEM ACL；任一组件缺失、祖先或目标为 reparse point，或 ACL 不符合要求时包装器拒绝执行，且不启动 indexer。
+
 ## 知识源与预检
 
 仅递归索引真实、位于 `KNOWLEDGE_PATH` 内的 `.md` 文件；符号链接、junction 和其他 reparse point 一律拒绝。每份文档必须使用安全 YAML front matter，且为映射并包含：

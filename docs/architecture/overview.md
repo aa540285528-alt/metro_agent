@@ -40,7 +40,7 @@ FastAPI
 - `metro_agent.storage`、`metro_agent.memory`：PostgreSQL 历史、Redis checkpoint、`chroma_db` 知识索引与 `memory_chroma_db` 长期记忆适配器。
 - `db-migrate`、`auth-migrate`：分别等待 PostgreSQL、MySQL healthy 后执行 Alembic；应用只在两个迁移成功后启动。
 
-Compose 网络不发布 MySQL、PostgreSQL 或 Redis 端口。应用仅发布到宿主机回环地址；WireMock 仅在 `mock` profile 下启动，认证链路不依赖公网资源。
+Compose 网络不发布 MySQL、PostgreSQL 或 Redis 端口。应用仅发布到宿主机回环地址；WireMock 仅在 `mock` profile 下启动，认证链路不依赖公网资源。`app_backend`、`knowledge_frontend` 与 `knowledge_backend` 都是内部网络；应用经 `knowledge_frontend` 只访问只读知识代理，绝不加入 `knowledge_backend`。唯一非内部网络 `controlled_egress` 只连接 `app`，仅用于经部署侧出口策略批准的模型和外部服务；Chroma、知识代理、indexer 与数据服务均不加入它。
 
 短期会话检查点使用 LangGraph Redis checkpointer，依赖 Redis Search 的 `FT.*` 命令。Compose 固定使用内置 Search 能力的 Redis 8，并在健康检查中验证 `FT.INFO` 可用；普通 Redis 7 镜像不能替代。
 

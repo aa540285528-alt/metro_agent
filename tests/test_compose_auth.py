@@ -210,9 +210,21 @@ def test_compose_isolates_published_knowledge_from_the_application() -> None:
         "metro_agent.knowledge_read_proxy:app",
     ]
     assert any(value.endswith(":ro") for value in services["knowledge-read-proxy"]["volumes"])
-    assert services["app"]["networks"] == ["knowledge_frontend", "app_backend"]
+    assert services["app"]["networks"] == [
+        "knowledge_frontend",
+        "app_backend",
+        "controlled_egress",
+    ]
     assert "knowledge_backend" not in services["app"]["networks"]
     assert "KNOWLEDGE_READ_PROXY_URL" not in services["app"]["environment"]
+    assert compose["networks"]["controlled_egress"] == {"internal": False}
+    assert {
+        service_name
+        for service_name, service in services.items()
+        if "controlled_egress" in service.get("networks", [])
+    } == {"app"}
+    for network in ("app_backend", "knowledge_frontend", "knowledge_backend"):
+        assert compose["networks"][network]["internal"] is True
 
 
 def test_compose_runs_knowledge_indexer_only_as_an_admin_profile() -> None:
