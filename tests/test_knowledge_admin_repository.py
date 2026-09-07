@@ -184,3 +184,30 @@ def test_record_release_supersedes_the_prior_current_release(
             ("build-1", "superseded"),
             ("build-2", "current"),
         ]
+
+
+def test_generic_completion_rejects_rollback_until_a_dedicated_restore_exists(
+    repository: KnowledgeAdminRepository, session_factory: sessionmaker[Session]
+) -> None:
+    draft = create_draft(repository)
+    repository.record_release(
+        build_id="build-rollback",
+        collection_name="private-rollback",
+        artifact_sha256="b" * 64,
+        source_manifest_sha256="c" * 64,
+        draft_id=draft.id,
+        document_count=1,
+        validation_summary={"valid": True},
+        published_at=datetime(2026, 9, 7, tzinfo=UTC),
+    )
+    queued = repository.queue_rollback(
+        "build-rollback", actor_user_id="42", actor_username="admin"
+    )
+    repository.claim_next_job()
+
+    with pytest.raises(ValueError, match="rollback_release.*dedicated rollback"):
+        repository.complete_job(queued.id)
+
+    with session_factory() as session:
+        job = session.get(KnowledgeJob, queued.id)
+        assert job is not None and job.status == "running"

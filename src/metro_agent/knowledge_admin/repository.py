@@ -146,6 +146,12 @@ class KnowledgeAdminRepository:
     ) -> None:
         with self._session_factory() as session, session.begin():
             job = self._locked_running_job(session, job_id)
+            if job.kind == "rollback_release":
+                raise ValueError(
+                    "rollback_release requires a dedicated rollback restore operation"
+                )
+            if job.kind not in {"validate_draft", "publish_draft", "get_status"}:
+                raise ValueError(f"Unsupported knowledge job completion kind {job.kind}")
             if job.kind == "validate_draft":
                 draft = self._locked_draft(session, self._required_target(job.draft_id))
                 draft.validation_report = validation_report
