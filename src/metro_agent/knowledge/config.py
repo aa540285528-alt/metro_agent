@@ -15,6 +15,7 @@ class KnowledgeSettings:
     source_root: Path | None
     e2e: bool
     knowledge_read_proxy_url: str = "http://knowledge-read-proxy:8000"
+    upload_staging_root: Path | None = None
 
     @classmethod
     def from_environment(cls) -> KnowledgeSettings:
@@ -28,6 +29,7 @@ class KnowledgeSettings:
             artifact_root=_optional_path("KNOWLEDGE_ARTIFACT_ROOT"),
             source_root=_optional_path("KNOWLEDGE_PATH"),
             e2e=e2e,
+            upload_staging_root=_optional_path("KNOWLEDGE_UPLOAD_STAGING_ROOT"),
         )
 
 
@@ -41,3 +43,12 @@ def require_knowledge_source_root(source_root: Path | None) -> Path:
     if source_root is None:
         raise ValueError("KNOWLEDGE_PATH must be configured before indexing")
     return source_root
+
+
+def require_knowledge_upload_staging_root(staging_root: Path | None) -> Path:
+    """Return a configured upload staging root or fail closed for worker use."""
+    if staging_root is None:
+        raise ValueError(
+            "KNOWLEDGE_UPLOAD_STAGING_ROOT must be configured before staging uploads"
+        )
+    return staging_root
