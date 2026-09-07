@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import Session, sessionmaker
+
+from metro_agent.knowledge_admin.models import (
+    Base,
+    KnowledgeAdminAuditEvent,
+    KnowledgeDraft,
+    KnowledgeJob,
+)
+from metro_agent.knowledge_admin.repository import KnowledgeAdminRepository
+
+
+@pytest.fixture
+def session_factory() -> sessionmaker[Session]:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    yield factory
+    engine.dispose()
+
+
+@pytest.fixture
+def repository(session_factory: sessionmaker[Session]) -> KnowledgeAdminRepository:
+    return KnowledgeAdminRepository(session_factory)
+
+
+def create_draft(repository: KnowledgeAdminRepository) -> KnowledgeDraft:
+    return repository.create_draft(
+        original_filename="knowledge.zip",
+        package_sha256="a" * 64,
+        package_size_bytes=42,
+        storage_key="drafts/private/a/knowledge.zip",
+        actor_user_id="42",
+        actor_username="admin",
+    )
+
+
+def test_queue_validation_commits_transition_job_and_audit_event(
+    repository: KnowledgeAdminRepository, session_factory: sessionmaker[Session]
+) -> None:
+    draft = create_draft(repository)
+
+    job = repository.queue_validation(
+        draft.id, actor_user_id="42", actor_username="admin"
+    )
+
+    assert job.kind == "validate_draft"
+    assert job.status == "queued"
+    with session_factory() as session:
+        stored_draft = session.get(KnowledgeDraft, draft.id)
+        stored_job = session.get(KnowledgeJob, job.id)
+        assert stored_draft is not None and stored_draft.status == "validating"
+        assert stored_job is not None and stored_job.draft_id == draft.id
+        assert session.scalar(select(KnowledgeJob).where(KnowledgeJob.id == job.id))
+        assert len(stored_draft.jobs) == 1
+        audit = session.scalar(
+            select(KnowledgeAdminAuditEvent).where(
+                KnowledgeAdminAuditEvent.job_id == job.id
+            )
+        )
+        assert audit is not None
+        assert audit.action == "validate_draft"
+        assert audit.result == "queued"
+
+
+def test_claiming_a_job_uses_postgres_skip_locked_and_only_claims_known_kinds(
+    repository: KnowledgeAdminRepository,
+) -> None:
+    statement = repository.queued_job_claim_statement()
+    compiled = str(statement.compile(dialect=postgresql.dialect()))
+
+    assert "FOR UPDATE SKIP LOCKED" in compiled
+    assert "knowledge_jobs.kind IN" in compiled
+
+
+def test_claim_and_failure_are_atomic_and_allow_revalidation(
+    repository: KnowledgeAdminRepository, session_factory: sessionmaker[Session]
+) -> None:
+    draft = create_draft(repository)
+    queued = repository.queue_validation(
+        draft.id, actor_user_id="42", actor_username="admin"
+    )
+
+    claimed = repository.claim_next_job(lease_seconds=60)
+    assert claimed is not None
+    assert claimed.id == queued.id
+    assert claimed.status == "running"
+    assert claimed.started_at is not None
+    assert claimed.lease_expires_at is not None
+
+    repository.fail_job(queued.id, "bad package" * 100)
+    retried = repository.queue_validation(
+        draft.id, actor_user_id="42", actor_username="admin"
+    )
+
+    with session_factory() as session:
+        failed = session.get(KnowledgeJob, queued.id)
+        stored_draft = session.get(KnowledgeDraft, draft.id)
+        assert failed is not None and failed.status == "failed"
+        assert failed.finished_at is not None
+        assert failed.failure_summary is not None and len(failed.failure_summary) == 512
+        assert stored_draft is not None and stored_draft.status == "validating"
+        assert retried.id != queued.id
+
+
+def test_published_draft_cannot_be_queued_for_publish_again(
+    repository: KnowledgeAdminRepository,
+) -> None:
+    draft = create_draft(repository)
+    validation = repository.queue_validation(
+        draft.id, actor_user_id="42", actor_username="admin"
+    )
+    repository.claim_next_job()
+    repository.complete_job(validation.id, validation_report={"valid": True})
+    publish = repository.queue_publish(
+        draft.id, actor_user_id="42", actor_username="admin"
+    )
+    repository.claim_next_job()
+    repository.complete_job(publish.id)
+
+    with pytest.raises(ValueError, match="published.*publishing"):
+        repository.queue_publish(draft.id, actor_user_id="42", actor_username="admin")
+
+
+def test_public_list_dtos_do_not_disclose_storage_or_collection_names(
+    repository: KnowledgeAdminRepository,
+) -> None:
+    draft = create_draft(repository)
+    repository.record_release(
+        build_id="build-20260907",
+        collection_name="private-staging-collection",
+        artifact_sha256="b" * 64,
+        source_manifest_sha256="c" * 64,
+        draft_id=draft.id,
+        document_count=2,
+        validation_summary={"valid": True},
+        published_at=datetime(2026, 9, 7, tzinfo=UTC),
+    )
+
+    draft_data = repository.list_drafts()[0].model_dump()
+    release_data = repository.list_releases()[0].model_dump()
+
+    assert "storage_key" not in draft_data
+    assert "collection_name" not in release_data

@@ -8,6 +8,7 @@ from sqlalchemy import engine_from_config, pool
 
 from metro_agent.storage.history.models import Base
 import metro_agent.observability.models
+import metro_agent.knowledge_admin.models  # noqa: F401
 
 
 config = context.config
