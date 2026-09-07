@@ -203,6 +203,13 @@ class KnowledgeAdminRepository:
         with self._session_factory() as session, session.begin():
             if session.get(KnowledgeDraft, draft_id) is None:
                 raise ValueError(f"Unknown knowledge draft {draft_id}")
+            current_releases = session.scalars(
+                select(KnowledgeRelease)
+                .where(KnowledgeRelease.status == "current")
+                .with_for_update()
+            ).all()
+            for current_release in current_releases:
+                current_release.status = "superseded"
             session.add(release)
         return release
 

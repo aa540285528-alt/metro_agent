@@ -12,6 +12,7 @@ from metro_agent.knowledge_admin.models import (
     KnowledgeAdminAuditEvent,
     KnowledgeDraft,
     KnowledgeJob,
+    KnowledgeRelease,
 )
 from metro_agent.knowledge_admin.repository import KnowledgeAdminRepository
 
@@ -148,3 +149,38 @@ def test_public_list_dtos_do_not_disclose_storage_or_collection_names(
 
     assert "storage_key" not in draft_data
     assert "collection_name" not in release_data
+
+
+def test_record_release_supersedes_the_prior_current_release(
+    repository: KnowledgeAdminRepository, session_factory: sessionmaker[Session]
+) -> None:
+    draft = create_draft(repository)
+    repository.record_release(
+        build_id="build-1",
+        collection_name="private-1",
+        artifact_sha256="b" * 64,
+        source_manifest_sha256="c" * 64,
+        draft_id=draft.id,
+        document_count=1,
+        validation_summary={"valid": True},
+        published_at=datetime(2026, 9, 7, tzinfo=UTC),
+    )
+    repository.record_release(
+        build_id="build-2",
+        collection_name="private-2",
+        artifact_sha256="d" * 64,
+        source_manifest_sha256="e" * 64,
+        draft_id=draft.id,
+        document_count=2,
+        validation_summary={"valid": True},
+        published_at=datetime(2026, 9, 8, tzinfo=UTC),
+    )
+
+    with session_factory() as session:
+        releases = session.scalars(
+            select(KnowledgeRelease).order_by(KnowledgeRelease.build_id)
+        ).all()
+        assert [(release.build_id, release.status) for release in releases] == [
+            ("build-1", "superseded"),
+            ("build-2", "current"),
+        ]

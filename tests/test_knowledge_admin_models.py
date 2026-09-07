@@ -195,3 +195,7 @@ def test_main_alembic_migration_creates_governed_knowledge_tables() -> None:
     }:
         assert f"CREATE TABLE {table_name}" in result.stdout
     assert "REFERENCES users" not in result.stdout
+    assert "CREATE UNIQUE INDEX uq_knowledge_releases_one_current" in result.stdout
+    assert "WHERE status = 'current'" in result.stdout
+    assert "CREATE FUNCTION prevent_knowledge_admin_audit_event_mutation" in result.stdout
+    assert "CREATE TRIGGER trg_knowledge_admin_audit_events_append_only" in result.stdout
