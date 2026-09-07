@@ -210,6 +210,45 @@ def test_rejects_duplicate_normalized_member_names(tmp_path: Path) -> None:
         )
 
 
+def test_rejects_case_insensitive_member_name_collisions(tmp_path: Path) -> None:
+    package = tmp_path / "case-collision.zip"
+    members = _valid_members()
+    members["Guides/intro.md"] = _document()
+    _write_package(package, members)
+
+    with pytest.raises(KnowledgePackageStagingError, match="case-insensitive"):
+        stage_zip_knowledge_package(
+            package, draft_id="case-collision", staging_root=tmp_path / "staging"
+        )
+
+
+@pytest.mark.parametrize("component", ["guides.", "guides "])
+def test_rejects_components_ending_with_windows_dangerous_suffixes(
+    tmp_path: Path, component: str
+) -> None:
+    package = tmp_path / "trailing-suffix.zip"
+    members = _valid_members()
+    members[f"{component}/intro.md"] = _document()
+    _write_package(package, members)
+
+    with pytest.raises(KnowledgePackageStagingError, match="invalid entry path"):
+        stage_zip_knowledge_package(
+            package, draft_id="trailing-suffix", staging_root=tmp_path / "staging"
+        )
+
+
+def test_rejects_ntfs_stream_syntax_in_member_names(tmp_path: Path) -> None:
+    package = tmp_path / "ntfs-stream.zip"
+    members = _valid_members()
+    members["guides/intro:metadata.md"] = _document()
+    _write_package(package, members)
+
+    with pytest.raises(KnowledgePackageStagingError, match="invalid entry path"):
+        stage_zip_knowledge_package(
+            package, draft_id="ntfs-stream", staging_root=tmp_path / "staging"
+        )
+
+
 @pytest.mark.parametrize(
     "external_attr, message",
     [

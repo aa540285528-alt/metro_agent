@@ -124,13 +124,20 @@ def _validate_entries(entries: list[zipfile.ZipInfo], raw_names: list[str]) -> N
         raise KnowledgePackageStagingError("archive: invalid ZIP package")
 
     normalized_names: set[str] = set()
+    casefolded_names: set[str] = set()
     total_extracted_bytes = 0
     smoke_found = False
     for entry, raw_name in zip(entries, raw_names, strict=True):
         name = _validate_entry_name(entry, raw_name)
+        casefolded_name = _validate_windows_path_components(name)
         if name in normalized_names:
             raise KnowledgePackageStagingError(f"{name}: duplicate archive entry")
+        if casefolded_name in casefolded_names:
+            raise KnowledgePackageStagingError(
+                f"{name}: case-insensitive archive entry collision"
+            )
         normalized_names.add(name)
+        casefolded_names.add(casefolded_name)
         _validate_entry_attributes(entry, name)
         if entry.file_size > MAX_EXTRACTED_FILE_BYTES:
             raise KnowledgePackageStagingError(f"{name}: file exceeds 10 MiB")
@@ -167,6 +174,16 @@ def _validate_entry_name(entry: zipfile.ZipInfo, name: str) -> str:
     if not normalized_name or normalized_name == ".":
         raise KnowledgePackageStagingError("archive: invalid entry path")
     return normalized_name
+
+
+def _validate_windows_path_components(name: str) -> str:
+    components = name.split("/")
+    if any(
+        component.endswith((".", " ")) or ":" in component
+        for component in components
+    ):
+        raise KnowledgePackageStagingError("archive: invalid entry path")
+    return "/".join(component.casefold() for component in components)
 
 
 def _raw_entry_names(package_path: Path, archive: zipfile.ZipFile) -> list[str]:
