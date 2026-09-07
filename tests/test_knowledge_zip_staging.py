@@ -310,6 +310,30 @@ def test_rejects_non_zip_files_and_unsafe_draft_ids(tmp_path: Path) -> None:
     assert keep.is_dir()
 
 
+def test_root_resolution_errors_are_sanitized_without_creating_a_draft(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = tmp_path / "knowledge.zip"
+    _write_package(package, _valid_members())
+    staging_root = tmp_path / "private-staging"
+    original_resolve = Path.resolve
+
+    def denied_resolve(path: Path, *args: object, **kwargs: object) -> Path:
+        if path == staging_root:
+            raise PermissionError(13, "denied", str(staging_root))
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", denied_resolve)
+
+    with pytest.raises(KnowledgePackageStagingError) as error:
+        stage_zip_knowledge_package(
+            package, draft_id="draft-123", staging_root=staging_root
+        )
+
+    assert str(staging_root) not in str(error.value)
+    assert not (staging_root / "draft-123").exists()
+
+
 def test_invalid_source_is_cleaned_up_and_does_not_leak_staging_path(
     tmp_path: Path,
 ) -> None:

@@ -45,9 +45,10 @@ def stage_zip_knowledge_package(
     package_path: Path, *, draft_id: str, staging_root: Path
 ) -> StagedKnowledgePackage:
     """Extract one safe ZIP package into its draft-specific staging directory."""
-    target = _draft_staging_directory(staging_root, draft_id)
+    target: Path | None = None
     target_created = False
     try:
+        target = _draft_staging_directory(staging_root, draft_id)
         package_size_bytes = _package_size(package_path)
         package_sha256 = _package_sha256(package_path)
         with zipfile.ZipFile(package_path) as archive:
@@ -229,8 +230,8 @@ def _extract_entries(
                 output.write(chunk)
 
 
-def _cleanup_failed_staging(target: Path, target_created: bool) -> None:
-    if not target_created:
+def _cleanup_failed_staging(target: Path | None, target_created: bool) -> None:
+    if target is None or not target_created:
         return
     try:
         shutil.rmtree(target)
