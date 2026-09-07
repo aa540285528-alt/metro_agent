@@ -184,6 +184,15 @@ def test_restore_validated_release_swaps_the_selected_history_to_current_and_pre
     assert len(client.collection.upserts) == 4
 
 
+def test_restore_validated_release_requires_a_before_publish_callback(
+    tmp_path: Path,
+) -> None:
+    create_validated_release(tmp_path, _descriptor("first"))
+
+    with pytest.raises(TypeError, match="before_publish"):
+        restore_validated_release(_Client(), tmp_path, "first")
+
+
 def test_rollback_rejects_missing_or_empty_previous_collection(tmp_path: Path) -> None:
     client = _Client()
     first = create_validated_release(tmp_path, _descriptor("first"))
@@ -203,7 +212,7 @@ def test_restore_rejects_an_empty_target_collection_before_pointer_mutation(
     create_validated_release(tmp_path, _descriptor("first"))
 
     with pytest.raises(ReleaseValidationError, match="empty"):
-        restore_validated_release(client, tmp_path, "first")
+        restore_validated_release(client, tmp_path, "first", before_publish=lambda: None)
 
     assert len(client.collection.upserts) == 0
 
@@ -323,7 +332,7 @@ def test_restore_rejects_a_mismatched_descriptor_before_pointer_mutation(
     )
 
     with pytest.raises(ReleaseValidationError, match="collection_name"):
-        restore_validated_release(client, tmp_path, "first")
+        restore_validated_release(client, tmp_path, "first", before_publish=lambda: None)
 
     assert trace == []
     assert len(client.collection.upserts) == 0

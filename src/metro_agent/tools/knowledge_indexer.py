@@ -255,8 +255,10 @@ class KnowledgeIndexer:
             require_knowledge_upload_staging_root(
                 KnowledgeSettings.from_environment().upload_staging_root
             )
-        )
-        source_root = _source_validation.validate_knowledge_source_root(staged_source_root)
+        ).resolve(strict=False)
+        source_root = _source_validation.validate_knowledge_source_root(
+            staged_source_root
+        ).resolve(strict=False)
         try:
             source_root.relative_to(staging_root)
         except ValueError as exc:

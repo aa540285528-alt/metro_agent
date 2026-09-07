@@ -109,13 +109,12 @@ def restore_validated_release(
     artifact_root: Path | str,
     build_id: str,
     *,
-    before_publish: Callable[[], None] | None = None,
+    before_publish: Callable[[], None],
 ) -> ReleasePointer:
     """Restore one validated historical release without rewriting the artifact."""
     release = read_validated_release(artifact_root, build_id)
     _ensure_collection_nonempty(client, release.collection_name, label="restored")
-    if before_publish is not None:
-        before_publish()
+    before_publish()
     return publish_validated_release(client, release)
 
 

@@ -421,6 +421,24 @@ def test_staged_source_publish_uses_the_injected_root_without_shelling_out(
     assert publish_calls == ["build-1"]
 
 
+def test_staged_source_publish_rejects_path_traversal_before_containment_check(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    staging_root = tmp_path / "staging"
+    staging_root.mkdir()
+    escaped_staged_source_root = staging_root / ".." / "outside" / "draft-123" / "source"
+    _write_staged_source(escaped_staged_source_root)
+    monkeypatch.setenv(
+        "KNOWLEDGE_UPLOAD_STAGING_ROOT",
+        str(staging_root / ".." / "staging"),
+    )
+
+    indexer = KnowledgeIndexer(client=object(), artifact_root=tmp_path, redis_client=object())
+
+    with pytest.raises(KnowledgeIndexerError, match="inside KNOWLEDGE_UPLOAD_STAGING_ROOT"):
+        indexer.build_and_publish_from_staged_source(escaped_staged_source_root)
+
+
 def test_staged_source_publish_rejects_sources_outside_the_configured_staging_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
