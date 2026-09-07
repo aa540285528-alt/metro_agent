@@ -19,7 +19,10 @@ if ($Command -notin $allowed) {
 }
 
 $operator = $principal.Identity.Name
-$dockerArguments = @("compose", "--profile", "knowledge-admin", "run", "--rm", "knowledge-indexer", $Command)
+$dockerArguments = @(
+    "compose", "--profile", "knowledge-admin", "run", "--rm", "knowledge-indexer",
+    "python", "-m", "metro_agent.tools.knowledge_indexer", $Command
+)
 $forceReasons = @("indexer-upgrade", "embedding-model-change", "reranker-model-change", "chunker-change", "recovery")
 if ($Command -eq "build-and-publish") {
     if ($Arguments.Count -eq 0) {

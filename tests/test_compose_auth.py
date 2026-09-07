@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import yaml
@@ -285,3 +286,30 @@ def test_knowledge_admin_wrappers_only_accept_governed_commands() -> None:
     assert "$principal.Identity.Name" in powershell
     assert "id -u" in shell
     assert "WindowsPrincipal" in powershell
+
+
+def test_knowledge_indexer_compose_runs_keep_the_module_entrypoint() -> None:
+    """`docker compose run SERVICE args` replaces the service command.
+
+    A governed subcommand therefore has to follow the Python module entrypoint,
+    rather than be passed as the first positional argument after the service.
+    """
+    operation_scripts = {
+        "knowledge-admin.sh": (ROOT / "deploy" / "operations" / "knowledge-admin.sh").read_text(
+            encoding="utf-8"
+        ),
+        "knowledge-admin.ps1": (
+            ROOT / "deploy" / "operations" / "knowledge-admin.ps1"
+        ).read_text(encoding="utf-8"),
+        "restore-all.sh": (ROOT / "deploy" / "operations" / "restore-all.sh").read_text(
+            encoding="utf-8"
+        ),
+    }
+
+    for script_name, script in operation_scripts.items():
+        assert "metro_agent.tools.knowledge_indexer" in script, script_name
+        assert not re.search(
+            r"knowledge-indexer(?:\s+\\)?\s*(?:\r?\n\s*)?"
+            r"(?:build-and-publish|rollback|verify|status)\b",
+            script,
+        ), script_name

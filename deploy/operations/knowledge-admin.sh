@@ -56,11 +56,11 @@ case "$command" in
     if [ -n "$force_reason" ]; then
       write_audit_record "build-and-publish" "force-rebuild"
       exec docker compose --profile knowledge-admin run --rm knowledge-indexer \
-        build-and-publish --force-rebuild "$force_reason"
+        python -m metro_agent.tools.knowledge_indexer build-and-publish --force-rebuild "$force_reason"
     fi
     write_audit_record "build-and-publish" "none"
     exec docker compose --profile knowledge-admin run --rm knowledge-indexer \
-      build-and-publish
+      python -m metro_agent.tools.knowledge_indexer build-and-publish
     ;;
   rollback)
     if [ "$#" -ne 0 ]; then
@@ -69,7 +69,7 @@ case "$command" in
     fi
     write_audit_record "rollback" "none"
     exec docker compose --profile knowledge-admin run --rm knowledge-indexer \
-      rollback
+      python -m metro_agent.tools.knowledge_indexer rollback
     ;;
   verify|status)
     if [ "$#" -ne 0 ]; then
@@ -77,6 +77,7 @@ case "$command" in
       exit 64
     fi
     write_audit_record "$command" "none"
-    exec docker compose --profile knowledge-admin run --rm knowledge-indexer "$command"
+    exec docker compose --profile knowledge-admin run --rm knowledge-indexer \
+      python -m metro_agent.tools.knowledge_indexer "$command"
     ;;
 esac

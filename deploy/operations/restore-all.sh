@@ -76,7 +76,8 @@ cmp "$BACKUP_DIR/owner-counts-before.txt" "$BACKUP_DIR/owner-counts-after.txt"
 
 docker compose up -d --wait chroma redis
 verify-restored-release() {
-  docker compose --profile knowledge-admin run --rm --no-deps knowledge-indexer verify
+  docker compose --profile knowledge-admin run --rm --no-deps knowledge-indexer \
+    python -m metro_agent.tools.knowledge_indexer verify
 }
 verify-restored-release
 
