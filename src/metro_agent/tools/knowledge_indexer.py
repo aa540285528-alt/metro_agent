@@ -345,10 +345,17 @@ class KnowledgeIndexer:
             raise KnowledgeIndexerError("built collection cannot be verified") from exc
 
     def _run_smoke_queries(self, source: Any, collection_name: str) -> None:
+        from llama_index.core import Settings
+
         collection = self.client.get_collection(collection_name)
         for smoke in source.smoke_queries:
             try:
-                response = collection.query(query_texts=[smoke.query], n_results=smoke.minimum_matches, include=["metadatas"])
+                query_embedding = Settings.embed_model.get_query_embedding(smoke.query)
+                response = collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=smoke.minimum_matches,
+                    include=["metadatas"],
+                )
                 matches = (response.get("metadatas") or [[]])[0]
             except Exception as exc:
                 raise KnowledgeIndexerError("release smoke query failed") from exc

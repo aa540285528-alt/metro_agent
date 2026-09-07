@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from chromadb.errors import NotFoundError
@@ -12,6 +13,51 @@ from metro_agent.tools.knowledge_indexer import (
     OperationEvents,
     parse_args,
 )
+
+
+def test_release_smoke_queries_use_the_active_llama_embedding_vector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Smoke checks must query with the embedder that wrote the collection."""
+    from llama_index.core import Settings
+
+    class ActiveEmbedding:
+        def get_query_embedding(self, query: str) -> list[float]:
+            assert query == "How do I begin?"
+            return [0.25, 0.75]
+
+    class Collection:
+        def query(
+            self,
+            *,
+            query_embeddings: list[list[float]],
+            n_results: int,
+            include: list[str],
+        ) -> dict[str, list[list[dict[str, str]]]]:
+            assert query_embeddings == [[0.25, 0.75]]
+            assert n_results == 1
+            assert include == ["metadatas"]
+            return {"metadatas": [[{"relative_path": "rules.md"}]]}
+
+    class Client:
+        def get_collection(self, collection_name: str) -> Collection:
+            assert collection_name == "knowledge-build"
+            return Collection()
+
+    monkeypatch.setattr(Settings, "_embed_model", ActiveEmbedding())
+    source = SimpleNamespace(
+        smoke_queries=[
+            SimpleNamespace(
+                query="How do I begin?",
+                minimum_matches=1,
+                expected_source="rules.md",
+            )
+        ]
+    )
+
+    KnowledgeIndexer(
+        client=Client(), artifact_root="artifacts", redis_client=object()
+    )._run_smoke_queries(source, "knowledge-build")
 
 
 def test_cli_exposes_only_governed_commands_and_fixed_force_reasons() -> None:
