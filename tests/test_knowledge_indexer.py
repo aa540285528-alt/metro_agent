@@ -10,6 +10,7 @@ from chromadb.errors import NotFoundError
 from metro_agent.tools.knowledge_indexer import (
     FORCE_REBUILD_REASONS,
     KnowledgeIndexer,
+    KnowledgeIndexerError,
     OperationEvents,
     parse_args,
 )
@@ -356,3 +357,86 @@ def test_legacy_publication_functions_explicitly_refuse_bypass() -> None:
     assert "clear_published_collection_name(" not in build_source
     assert "publish_collection_name(" not in reconcile_source
     assert "clear_published_collection_name(" not in reconcile_source
+
+
+def _write_staged_source(root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "guide.md").write_text(
+        """---
+owner: operations
+source: handbook
+updated: 2026-09-01
+effective_date: 2026-09-01
+expires_at: 2026-12-31
+risk_level: general
+---
+# Guide
+""",
+        encoding="utf-8",
+    )
+    (root / "release-smoke-queries.jsonl").write_text(
+        json.dumps(
+            {
+                "query": "How do I begin?",
+                "expected_source": "guide.md",
+                "minimum_matches": 1,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_staged_source_publish_uses_the_injected_root_without_shelling_out(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    staging_root = tmp_path / "staging"
+    staged_source_root = staging_root / "draft-123" / "source"
+    _write_staged_source(staged_source_root)
+    monkeypatch.setenv("KNOWLEDGE_UPLOAD_STAGING_ROOT", str(staging_root))
+    monkeypatch.setattr(
+        "metro_agent.knowledge.source_validation.clean_git_commit",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("shell lookup should not run")),
+    )
+
+    indexer = KnowledgeIndexer(client=object(), artifact_root=tmp_path, redis_client=object())
+    monkeypatch.setattr(indexer, "_current_release_descriptor", lambda: None)
+    monkeypatch.setattr(
+        "metro_agent.tools.knowledge_indexer.read_release_pointer",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(indexer, "_build_collection", lambda _source: ("build-1", "metro__build_build-1"))
+    monkeypatch.setattr(indexer, "_ensure_collection_nonempty", lambda _name: None)
+    monkeypatch.setattr(indexer, "_run_smoke_queries", lambda _source, _name: None)
+    publish_calls: list[str] = []
+    monkeypatch.setattr(
+        "metro_agent.tools.knowledge_indexer.publish_validated_release",
+        lambda _client, release: publish_calls.append(release.build_id),
+    )
+    monkeypatch.setattr("metro_agent.tools.knowledge_indexer.PublicationLock", _Lock)
+
+    result = indexer.build_and_publish_from_staged_source(staged_source_root)
+
+    assert result == {"status": "published", "build_id": "build-1"}
+    assert publish_calls == ["build-1"]
+
+
+def test_staged_source_publish_rejects_sources_outside_the_configured_staging_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    staging_root = tmp_path / "staging"
+    staged_source_root = tmp_path / "outside"
+    _write_staged_source(staged_source_root)
+    staging_root.mkdir()
+    monkeypatch.setenv("KNOWLEDGE_UPLOAD_STAGING_ROOT", str(staging_root))
+
+    indexer = KnowledgeIndexer(client=object(), artifact_root=tmp_path, redis_client=object())
+    monkeypatch.setattr(indexer, "_build_collection", lambda _source: (_ for _ in ()).throw(AssertionError("build should not run")))
+    monkeypatch.setattr(indexer, "_run_smoke_queries", lambda _source, _name: (_ for _ in ()).throw(AssertionError("smoke queries should not run")))
+    monkeypatch.setattr(
+        "metro_agent.tools.knowledge_indexer.publish_validated_release",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("publish should not run")),
+    )
+
+    with pytest.raises(KnowledgeIndexerError, match="KNOWLEDGE_UPLOAD_STAGING_ROOT"):
+        indexer.build_and_publish_from_staged_source(staged_source_root)

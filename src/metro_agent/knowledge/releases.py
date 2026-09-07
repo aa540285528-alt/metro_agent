@@ -104,6 +104,21 @@ def publish_validated_release(client: Any, release: ValidatedRelease) -> Release
     return pointer
 
 
+def restore_validated_release(
+    client: Any,
+    artifact_root: Path | str,
+    build_id: str,
+    *,
+    before_publish: Callable[[], None] | None = None,
+) -> ReleasePointer:
+    """Restore one validated historical release without rewriting the artifact."""
+    release = read_validated_release(artifact_root, build_id)
+    _ensure_collection_nonempty(client, release.collection_name, label="restored")
+    if before_publish is not None:
+        before_publish()
+    return publish_validated_release(client, release)
+
+
 def read_release_pointer(client: Any, *, required: bool = True) -> ReleasePointer | None:
     try:
         registry = client.get_collection(INDEX_REGISTRY_COLLECTION_NAME)
@@ -162,7 +177,7 @@ def rollback_release_pointer(
         raise ReleaseValidationError("previous validated artifact digest does not match pointer")
     if previous.collection_name != pointer.previous_collection_name:
         raise ReleaseValidationError("previous validated artifact collection does not match pointer")
-    _ensure_collection_nonempty(client, previous.collection_name)
+    _ensure_collection_nonempty(client, previous.collection_name, label="previous")
     swapped = ReleasePointer(
         current_build_id=previous.build_id,
         current_collection_name=previous.collection_name,
@@ -194,15 +209,15 @@ def _upsert_pointer(client: Any, pointer: ReleasePointer) -> None:
     )
 
 
-def _ensure_collection_nonempty(client: Any, collection_name: str) -> None:
+def _ensure_collection_nonempty(client: Any, collection_name: str, *, label: str) -> None:
     try:
         collection = client.get_collection(collection_name)
         if collection.count() <= 0:
-            raise ReleaseValidationError("previous collection is empty")
+            raise ReleaseValidationError(f"{label} collection is empty")
     except ReleaseValidationError:
         raise
     except Exception as exc:
-        raise ReleaseValidationError("previous collection is unavailable") from exc
+        raise ReleaseValidationError(f"{label} collection is unavailable") from exc
 
 
 def _validated_descriptor(descriptor: Mapping[str, Any]) -> dict[str, Any]:

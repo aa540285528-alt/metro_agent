@@ -8,11 +8,13 @@ import pytest
 from chromadb.errors import NotFoundError
 
 from metro_agent.knowledge.releases import (
+    INDEX_REGISTRY_COLLECTION_NAME,
     ReleasePointer,
     ReleaseValidationError,
     create_validated_release,
     publish_validated_release,
     read_release_pointer,
+    restore_validated_release,
     rollback_release_pointer,
 )
 from metro_agent.knowledge.publication_lock import PublicationLockError
@@ -24,9 +26,10 @@ from metro_agent.tools.knowledge_index_registry import (
 
 
 class _Collection:
-    def __init__(self) -> None:
+    def __init__(self, *, count: int = 1) -> None:
         self.record: dict[str, object] | None = None
         self.upserts: list[dict[str, object]] = []
+        self.count_value = count
 
     def upsert(self, **kwargs: object) -> None:
         self.upserts.append(kwargs)
@@ -36,7 +39,17 @@ class _Collection:
         return {"metadatas": [self.record] if self.record else []}
 
     def count(self) -> int:
-        return 1
+        return self.count_value
+
+
+class _TracingCollection(_Collection):
+    def __init__(self, trace: list[str], *, count: int = 1) -> None:
+        super().__init__(count=count)
+        self.trace = trace
+
+    def upsert(self, **kwargs: object) -> None:
+        self.trace.append("upsert")
+        super().upsert(**kwargs)
 
 
 class _Client:
@@ -48,6 +61,22 @@ class _Client:
 
     def get_collection(self, _: str) -> _Collection:
         return self.collection
+
+
+class _CollectionsClient:
+    def __init__(self, *, registry: _Collection, collections: dict[str, _Collection]) -> None:
+        self.collection = registry
+        self._collections = collections
+
+    def get_or_create_collection(self, name: str) -> _Collection:
+        if name == INDEX_REGISTRY_COLLECTION_NAME:
+            return self.collection
+        return self._collections.setdefault(name, _Collection())
+
+    def get_collection(self, name: str) -> _Collection:
+        if name == INDEX_REGISTRY_COLLECTION_NAME:
+            return self.collection
+        return self._collections[name]
 
 
 def _descriptor(build_id: str) -> dict[str, object]:
@@ -116,6 +145,45 @@ def test_rollback_only_swaps_a_validated_nonempty_previous_release(tmp_path: Pat
     assert len(client.collection.upserts) == 3
 
 
+def test_restore_validated_release_swaps_the_selected_history_to_current_and_previous(
+    tmp_path: Path,
+) -> None:
+    trace: list[str] = []
+    client = _CollectionsClient(
+        registry=_TracingCollection(trace),
+        collections={
+            "metro__build_first": _Collection(),
+            "metro__build_second": _Collection(),
+            "metro__build_third": _Collection(),
+        },
+    )
+    first = create_validated_release(tmp_path, _descriptor("first"))
+    second = create_validated_release(tmp_path, _descriptor("second"))
+    third = create_validated_release(tmp_path, _descriptor("third"))
+    publish_validated_release(client, first)
+    publish_validated_release(client, second)
+    publish_validated_release(client, third)
+
+    trace.clear()
+    restored = restore_validated_release(
+        client,
+        tmp_path,
+        "first",
+        before_publish=lambda: trace.append("before"),
+    )
+
+    assert restored == ReleasePointer(
+        current_build_id="first",
+        current_collection_name="metro__build_first",
+        current_artifact_sha256=first.sha256,
+        previous_build_id="third",
+        previous_collection_name="metro__build_third",
+        previous_artifact_sha256=third.sha256,
+    )
+    assert trace == ["before", "upsert"]
+    assert len(client.collection.upserts) == 4
+
+
 def test_rollback_rejects_missing_or_empty_previous_collection(tmp_path: Path) -> None:
     client = _Client()
     first = create_validated_release(tmp_path, _descriptor("first"))
@@ -123,6 +191,21 @@ def test_rollback_rejects_missing_or_empty_previous_collection(tmp_path: Path) -
 
     with pytest.raises(ReleaseValidationError, match="previous"):
         rollback_release_pointer(client, tmp_path)
+
+
+def test_restore_rejects_an_empty_target_collection_before_pointer_mutation(
+    tmp_path: Path,
+) -> None:
+    client = _CollectionsClient(
+        registry=_Collection(),
+        collections={"metro__build_first": _Collection(count=0)},
+    )
+    create_validated_release(tmp_path, _descriptor("first"))
+
+    with pytest.raises(ReleaseValidationError, match="empty"):
+        restore_validated_release(client, tmp_path, "first")
+
+    assert len(client.collection.upserts) == 0
 
 
 def test_pointer_rejects_non_hex_artifact_digests() -> None:
@@ -215,3 +298,32 @@ def test_rollback_does_not_upsert_after_a_prepublication_lease_loss(tmp_path: Pa
     with pytest.raises(PublicationLockError, match="renew"):
         rollback_release_pointer(client, tmp_path, before_publish=lose_lease)
     assert len(client.collection.upserts) == 2
+
+
+def test_restore_rejects_a_mismatched_descriptor_before_pointer_mutation(
+    tmp_path: Path,
+) -> None:
+    trace: list[str] = []
+    client = _CollectionsClient(
+        registry=_TracingCollection(trace),
+        collections={"metro__build_first": _Collection()},
+    )
+    release = create_validated_release(tmp_path, _descriptor("first"))
+    release.path.write_text(
+        json.dumps(
+            {
+                **_descriptor("first"),
+                "collection_name": "metro__build_other",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReleaseValidationError, match="collection_name"):
+        restore_validated_release(client, tmp_path, "first")
+
+    assert trace == []
+    assert len(client.collection.upserts) == 0

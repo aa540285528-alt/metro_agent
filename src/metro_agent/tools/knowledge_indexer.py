@@ -12,8 +12,13 @@ from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
 
+from metro_agent.knowledge import source_validation as _source_validation
 from metro_agent.knowledge.chroma_client import get_chroma_client
-from metro_agent.knowledge.config import KnowledgeSettings, require_knowledge_source_root
+from metro_agent.knowledge.config import (
+    KnowledgeSettings,
+    require_knowledge_source_root,
+    require_knowledge_upload_staging_root,
+)
 from metro_agent.knowledge.operator_identity import trusted_operator_identity
 from metro_agent.knowledge.publication_lock import PublicationLock
 from metro_agent.knowledge.releases import (
@@ -161,9 +166,29 @@ class KnowledgeIndexer:
         *,
         force_reason: str | None = None,
     ) -> dict[str, str]:
+        return self._build_and_publish(self._validated_source, force_reason=force_reason)
+
+    def build_and_publish_from_staged_source(
+        self,
+        staged_source_root: Path,
+        *,
+        force_reason: str | None = None,
+    ) -> dict[str, str]:
+        """Build and publish from an already staged, file-system validated source."""
+        return self._build_and_publish(
+            lambda: self._validated_staged_source(staged_source_root),
+            force_reason=force_reason,
+        )
+
+    def _build_and_publish(
+        self,
+        source_provider: Any,
+        *,
+        force_reason: str | None = None,
+    ) -> dict[str, str]:
         if force_reason is not None and force_reason not in FORCE_REBUILD_REASONS:
             raise KnowledgeIndexerError("force_reason is not an approved rebuild reason")
-        initial_source = self._validated_source()
+        initial_source = source_provider()
         source_sha = self._source_sha(initial_source)
         provenance = self._provenance()
         current = self._current_release_descriptor()
@@ -177,7 +202,7 @@ class KnowledgeIndexer:
         try:
             with PublicationLock(self.redis_client, PUBLICATION_LOCK_KEY) as publication_lock:
                 # Re-check after taking exclusive ownership: no mixed source tree is publishable.
-                source = self._validated_source()
+                source = source_provider()
                 if self._source_sha(source) != source_sha:
                     raise KnowledgeIndexerError("knowledge source changed during build preparation")
                 current = self._current_release_descriptor()
@@ -195,7 +220,7 @@ class KnowledgeIndexer:
                 build_id, collection_name = self._build_collection(source)
                 self._ensure_collection_nonempty(collection_name)
                 self._run_smoke_queries(source, collection_name)
-                completed_source = self._validated_source()
+                completed_source = source_provider()
                 if self._source_sha(completed_source) != source_sha:
                     raise KnowledgeIndexerError("knowledge source changed during build")
                 descriptor = {
@@ -224,6 +249,46 @@ class KnowledgeIndexer:
             if isinstance(exc, KnowledgeIndexerError):
                 raise
             raise KnowledgeIndexerError("knowledge build-and-publish failed") from exc
+
+    def _validated_staged_source(self, staged_source_root: Path) -> Any:
+        staging_root = _source_validation.validate_knowledge_source_root(
+            require_knowledge_upload_staging_root(
+                KnowledgeSettings.from_environment().upload_staging_root
+            )
+        )
+        source_root = _source_validation.validate_knowledge_source_root(staged_source_root)
+        try:
+            source_root.relative_to(staging_root)
+        except ValueError as exc:
+            raise KnowledgeIndexerError(
+                "staged source root must be inside KNOWLEDGE_UPLOAD_STAGING_ROOT"
+            ) from exc
+        try:
+            documents = _source_validation._discover_documents(
+                source_root, _source_validation._shanghai_today()
+            )
+            smoke_path = source_root / _source_validation.SMOKE_QUERY_FILE
+            _source_validation._reject_link_or_reparse(
+                smoke_path, _source_validation.SMOKE_QUERY_FILE
+            )
+            if not smoke_path.is_file():
+                raise KnowledgeIndexerError(
+                    "staged source is missing required smoke query file"
+                )
+            smoke_queries = _source_validation._read_jsonl(
+                smoke_path, {document.relative_path for document in documents}
+            )
+        except _source_validation.KnowledgeSourceValidationError as exc:
+            raise KnowledgeIndexerError(str(exc)) from exc
+        return _source_validation.ValidatedKnowledgeSource(
+            root=source_root,
+            documents=tuple(documents),
+            smoke_queries=tuple(smoke_queries),
+            source_tree_sha256=_source_validation.source_tree_sha256(
+                list(documents), smoke_path
+            ),
+            git_commit=None,
+        )
 
     def status(self) -> dict[str, Any]:
         pointer = read_release_pointer(self.client, required=False)
