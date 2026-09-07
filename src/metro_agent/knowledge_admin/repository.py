@@ -164,6 +164,22 @@ class KnowledgeAdminRepository:
             job.lease_expires_at = None
             self._audit_for_job(session, job, "succeeded")
 
+    def complete_rollback_job(self, job_id: str, restored_release_build_id: str) -> None:
+        """Record a worker-completed rollback after it restored the validated target."""
+        with self._session_factory() as session, session.begin():
+            job = self._locked_running_job(session, job_id)
+            if job.kind != "rollback_release":
+                raise ValueError(f"Knowledge job {job_id} is not a rollback_release")
+            if job.release_build_id != restored_release_build_id:
+                raise ValueError(
+                    "Restored release does not match rollback target "
+                    f"for knowledge job {job_id}"
+                )
+            job.status = "succeeded"
+            job.finished_at = datetime.now(UTC)
+            job.lease_expires_at = None
+            self._audit_for_job(session, job, "succeeded")
+
     def fail_job(self, job_id: str, failure_summary: str) -> None:
         with self._session_factory() as session, session.begin():
             job = self._locked_running_job(session, job_id)

@@ -211,3 +211,81 @@ def test_generic_completion_rejects_rollback_until_a_dedicated_restore_exists(
     with session_factory() as session:
         job = session.get(KnowledgeJob, queued.id)
         assert job is not None and job.status == "running"
+
+
+def test_dedicated_rollback_completion_records_success_after_target_restore(
+    repository: KnowledgeAdminRepository, session_factory: sessionmaker[Session]
+) -> None:
+    draft = create_draft(repository)
+    repository.record_release(
+        build_id="build-restored",
+        collection_name="private-restored",
+        artifact_sha256="b" * 64,
+        source_manifest_sha256="c" * 64,
+        draft_id=draft.id,
+        document_count=1,
+        validation_summary={"valid": True},
+        published_at=datetime(2026, 9, 7, tzinfo=UTC),
+    )
+    queued = repository.queue_rollback(
+        "build-restored", actor_user_id="42", actor_username="admin"
+    )
+    repository.claim_next_job()
+
+    repository.complete_rollback_job(queued.id, "build-restored")
+
+    with session_factory() as session:
+        job = session.get(KnowledgeJob, queued.id)
+        audit = session.scalar(
+            select(KnowledgeAdminAuditEvent).where(
+                KnowledgeAdminAuditEvent.job_id == queued.id,
+                KnowledgeAdminAuditEvent.result == "succeeded",
+            )
+        )
+        assert job is not None and job.status == "succeeded"
+        assert job.finished_at is not None and job.lease_expires_at is None
+        assert audit is not None and audit.action == "rollback_release"
+
+
+def test_dedicated_rollback_completion_rejects_wrong_target_without_state_change(
+    repository: KnowledgeAdminRepository, session_factory: sessionmaker[Session]
+) -> None:
+    draft = create_draft(repository)
+    repository.record_release(
+        build_id="build-expected",
+        collection_name="private-expected",
+        artifact_sha256="b" * 64,
+        source_manifest_sha256="c" * 64,
+        draft_id=draft.id,
+        document_count=1,
+        validation_summary={"valid": True},
+        published_at=datetime(2026, 9, 7, tzinfo=UTC),
+    )
+    queued = repository.queue_rollback(
+        "build-expected", actor_user_id="42", actor_username="admin"
+    )
+    repository.claim_next_job()
+
+    with pytest.raises(ValueError, match="does not match rollback target"):
+        repository.complete_rollback_job(queued.id, "build-other")
+
+    with session_factory() as session:
+        job = session.get(KnowledgeJob, queued.id)
+        assert job is not None and job.status == "running"
+
+
+def test_dedicated_rollback_completion_rejects_other_job_kinds(
+    repository: KnowledgeAdminRepository, session_factory: sessionmaker[Session]
+) -> None:
+    draft = create_draft(repository)
+    queued = repository.queue_validation(
+        draft.id, actor_user_id="42", actor_username="admin"
+    )
+    repository.claim_next_job()
+
+    with pytest.raises(ValueError, match="not a rollback_release"):
+        repository.complete_rollback_job(queued.id, "build-any")
+
+    with session_factory() as session:
+        job = session.get(KnowledgeJob, queued.id)
+        assert job is not None and job.status == "running"
