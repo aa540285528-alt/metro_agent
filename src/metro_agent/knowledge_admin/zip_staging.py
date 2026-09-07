@@ -27,6 +27,11 @@ _COPY_CHUNK_BYTES = 64 * 1024
 _WINDOWS_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 _CENTRAL_DIRECTORY_HEADER = b"PK\x01\x02"
 _CENTRAL_DIRECTORY_FIXED_SIZE = 46
+_DOS_DEVICE_NAMES = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{number}" for number in range(1, 10)}
+    | {f"lpt{number}" for number in range(1, 10)}
+)
 
 
 class KnowledgePackageStagingError(ValueError):
@@ -180,6 +185,11 @@ def _validate_windows_path_components(name: str) -> str:
     components = name.split("/")
     if any(
         component.endswith((".", " ")) or ":" in component
+        for component in components
+    ):
+        raise KnowledgePackageStagingError("archive: invalid entry path")
+    if any(
+        component.split(".", 1)[0].casefold() in _DOS_DEVICE_NAMES
         for component in components
     ):
         raise KnowledgePackageStagingError("archive: invalid entry path")

@@ -250,6 +250,33 @@ def test_rejects_ntfs_stream_syntax_in_member_names(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    "component",
+    [
+        "con.md",
+        "PRN.extra.md",
+        "aux.md",
+        "NUL.metadata.md",
+        "com1.md",
+        "COM9.extra.md",
+        "lpt1.md",
+        "LPT9.metadata.md",
+    ],
+)
+def test_rejects_reserved_dos_device_name_components(
+    tmp_path: Path, component: str
+) -> None:
+    package = tmp_path / "dos-device.zip"
+    members = _valid_members()
+    members[f"guides/{component}"] = _document()
+    _write_package(package, members)
+
+    with pytest.raises(KnowledgePackageStagingError, match="invalid entry path"):
+        stage_zip_knowledge_package(
+            package, draft_id="dos-device", staging_root=tmp_path / "staging"
+        )
+
+
+@pytest.mark.parametrize(
     "external_attr, message",
     [
         (stat.S_IFLNK << 16, "symbolic links"),
