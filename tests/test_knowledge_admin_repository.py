@@ -229,6 +229,59 @@ def test_public_list_dtos_do_not_disclose_storage_or_collection_names(
     assert "collection_name" not in release_data
 
 
+def test_list_audit_events_returns_newest_rows_first_and_honors_limit(
+    repository: KnowledgeAdminRepository, session_factory: sessionmaker[Session]
+) -> None:
+    draft = create_draft(repository)
+    repository.record_release(
+        build_id="build-audit-list",
+        collection_name="private-audit-list",
+        artifact_sha256="b" * 64,
+        source_manifest_sha256="c" * 64,
+        draft_id=draft.id,
+        document_count=1,
+        validation_summary={"valid": True},
+        published_at=datetime(2026, 9, 7, tzinfo=UTC),
+    )
+    queued = repository.queue_rollback(
+        "build-audit-list",
+        actor_user_id="42",
+        actor_username="admin",
+        reason_summary="restore validated release",
+    )
+    repository.claim_next_job()
+    repository.complete_rollback_job(queued.id, "build-audit-list")
+
+    with session_factory.begin() as session:
+        audits = {
+            (audit.action, audit.result): audit
+            for audit in session.scalars(
+                select(KnowledgeAdminAuditEvent).where(
+                    KnowledgeAdminAuditEvent.action.in_(["upload_draft", "rollback_release"])
+                )
+            ).all()
+        }
+        audits[("upload_draft", "succeeded")].occurred_at = datetime(
+            2026, 9, 8, 12, 0, tzinfo=UTC
+        )
+        audits[("rollback_release", "queued")].occurred_at = datetime(
+            2026, 9, 8, 12, 1, tzinfo=UTC
+        )
+        audits[("rollback_release", "running")].occurred_at = datetime(
+            2026, 9, 8, 12, 2, tzinfo=UTC
+        )
+        audits[("rollback_release", "succeeded")].occurred_at = datetime(
+            2026, 9, 8, 12, 3, tzinfo=UTC
+        )
+
+    limited = repository.list_audit_events(limit=2)
+    all_events = repository.list_audit_events(limit=3)
+
+    assert [event.result for event in limited] == ["succeeded", "running"]
+    assert [event.result for event in all_events] == ["succeeded", "running", "queued"]
+    assert all_events[-1].reason_summary == "restore validated release"
+
+
 def test_record_release_supersedes_the_prior_current_release(
     repository: KnowledgeAdminRepository, session_factory: sessionmaker[Session]
 ) -> None:

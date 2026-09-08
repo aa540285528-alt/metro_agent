@@ -152,6 +152,9 @@ class KnowledgeAdminService:
     def list_releases(self) -> list[Any]:
         return self.repository.list_releases()
 
+    def list_audit_events(self, *, limit: int = 50) -> list[Any]:
+        return self.repository.list_audit_events(limit=limit)
+
     def queue_rollback(
         self, release_build_id: str, *, reason: str, current_user: CurrentUser
     ) -> Any:
@@ -223,6 +226,9 @@ class _LazyKnowledgeAdminService:
 
     def list_releases(self) -> list[Any]:
         return self._resolve().list_releases()
+
+    def list_audit_events(self, *, limit: int = 50) -> list[Any]:
+        return self._resolve().list_audit_events(limit=limit)
 
     def queue_rollback(
         self, release_build_id: str, *, reason: str, current_user: CurrentUser

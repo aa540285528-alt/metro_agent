@@ -15,7 +15,7 @@ from metro_agent.knowledge_admin.models import (
     KnowledgeRelease,
     transition_draft,
 )
-from metro_agent.knowledge_admin.schemas import DraftListItem, ReleaseListItem
+from metro_agent.knowledge_admin.schemas import AuditListItem, DraftListItem, ReleaseListItem
 
 
 class KnowledgeAdminRepository:
@@ -394,6 +394,33 @@ class KnowledgeAdminRepository:
                     published_at=release.published_at,
                 )
                 for release in releases
+            ]
+
+    def list_audit_events(self, *, limit: int = 50) -> list[AuditListItem]:
+        with self._session_factory() as session:
+            events = session.scalars(
+                select(KnowledgeAdminAuditEvent)
+                .order_by(
+                    KnowledgeAdminAuditEvent.occurred_at.desc(),
+                    KnowledgeAdminAuditEvent.id.desc(),
+                )
+                .limit(limit)
+            ).all()
+            return [
+                AuditListItem(
+                    id=event.id,
+                    action=event.action,
+                    result=event.result,
+                    actor_user_id=event.actor_user_id,
+                    actor_username=event.actor_username,
+                    draft_id=event.draft_id,
+                    job_id=event.job_id,
+                    release_build_id=event.release_build_id,
+                    reason_summary=event.reason_summary,
+                    failure_summary=event.failure_summary,
+                    occurred_at=event.occurred_at,
+                )
+                for event in events
             ]
 
     @staticmethod

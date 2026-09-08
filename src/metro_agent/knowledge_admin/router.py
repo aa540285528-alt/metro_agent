@@ -3,13 +3,14 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
 
 from metro_agent.auth.dependencies import CurrentUser, require_admin, require_same_origin
 from metro_agent.knowledge_admin.schemas import (
     DraftDetail,
     DraftListItem,
     DraftSubmissionResult,
+    AuditListItem,
     EmptyAdminMutation,
     JobStatus,
     ReleaseListItem,
@@ -103,6 +104,14 @@ def create_knowledge_admin_router() -> APIRouter:
         _admin: CurrentUser = Depends(require_admin),
     ) -> list[Any]:
         return _service(request).list_releases()
+
+    @router.get("/audits", response_model=list[AuditListItem])
+    def list_audits(
+        request: Request,
+        limit: int = Query(default=50, ge=1, le=100),
+        _admin: CurrentUser = Depends(require_admin),
+    ) -> list[Any]:
+        return _service(request).list_audit_events(limit=limit)
 
     @router.post(
         "/releases/{release_build_id}/rollback",

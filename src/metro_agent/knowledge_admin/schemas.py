@@ -52,6 +52,20 @@ class ReleaseDetail(ReleaseListItem):
     validation_summary: dict[str, Any]
 
 
+class AuditListItem(_PublicSchema):
+    id: str
+    action: str
+    result: str
+    actor_user_id: str
+    actor_username: str
+    draft_id: str | None
+    job_id: str | None
+    release_build_id: str | None
+    reason_summary: str | None
+    failure_summary: str | None
+    occurred_at: datetime
+
+
 class DraftSubmissionResult(_PublicSchema):
     draft_id: str
     job_id: str

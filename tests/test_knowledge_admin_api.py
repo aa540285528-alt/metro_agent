@@ -15,7 +15,10 @@ from metro_agent.api import create_app
 from metro_agent.auth.dependencies import CurrentUser
 from metro_agent.auth.models import AuthBase
 from metro_agent.auth.service import AuthService
-from metro_agent.knowledge_admin.models import Base as KnowledgeAdminBase, KnowledgeAdminAuditEvent
+from metro_agent.knowledge_admin.models import (
+    Base as KnowledgeAdminBase,
+    KnowledgeAdminAuditEvent,
+)
 from metro_agent.knowledge_admin.repository import KnowledgeAdminRepository
 from metro_agent.knowledge_admin.service import (
     KnowledgeAdminInvalidStateError,
@@ -85,6 +88,21 @@ class FakeKnowledgeAdminService:
                 validation_summary={"valid": True},
             )
         ]
+        self.audit_events = [
+            SimpleNamespace(
+                id="33333333-3333-4333-8333-333333333333",
+                action="rollback_release",
+                result="queued",
+                actor_user_id="7",
+                actor_username="metro.admin",
+                draft_id=None,
+                job_id=JOB_ID,
+                release_build_id=RELEASE_BUILD_ID,
+                reason_summary="restore validated release",
+                failure_summary=None,
+                occurred_at=NOW,
+            )
+        ]
 
     async def upload_draft(self, *, package, current_user=None) -> dict[str, object]:
         self.calls.append(
@@ -145,6 +163,10 @@ class FakeKnowledgeAdminService:
     def list_releases(self) -> list[SimpleNamespace]:
         self.calls.append(("list_releases", None))
         return list(self.releases)
+
+    def list_audit_events(self, *, limit: int = 50) -> list[SimpleNamespace]:
+        self.calls.append(("list_audit_events", limit))
+        return list(self.audit_events[:limit])
 
     def queue_rollback(
         self, release_build_id: str, *, reason: str, current_user
@@ -243,6 +265,7 @@ def test_create_app_injects_knowledge_admin_service_once(admin_api) -> None:
         ("GET", "/api/admin/knowledge/drafts", None, None),
         ("GET", f"/api/admin/knowledge/drafts/{DRAFT_ID}", None, None),
         ("GET", "/api/admin/knowledge/releases", None, None),
+        ("GET", "/api/admin/knowledge/audits", None, None),
         ("GET", f"/api/admin/knowledge/jobs/{JOB_ID}", None, None),
         ("POST", f"/api/admin/knowledge/drafts/{DRAFT_ID}/validate", {}, None),
         ("POST", f"/api/admin/knowledge/drafts/{DRAFT_ID}/publish", {}, None),
@@ -263,6 +286,7 @@ def test_knowledge_admin_routes_require_authentication(
         ("GET", "/api/admin/knowledge/drafts", None, None),
         ("GET", f"/api/admin/knowledge/drafts/{DRAFT_ID}", None, None),
         ("GET", "/api/admin/knowledge/releases", None, None),
+        ("GET", "/api/admin/knowledge/audits", None, None),
         ("GET", f"/api/admin/knowledge/jobs/{JOB_ID}", None, None),
         ("POST", f"/api/admin/knowledge/drafts/{DRAFT_ID}/validate", {}, None),
         ("POST", f"/api/admin/knowledge/drafts/{DRAFT_ID}/publish", {}, None),
@@ -365,6 +389,7 @@ def test_knowledge_admin_routes_use_current_user_and_hide_private_fields(admin_a
     validate = admin_api.client.post(f"/api/admin/knowledge/drafts/{DRAFT_ID}/validate")
     publish = admin_api.client.post(f"/api/admin/knowledge/drafts/{DRAFT_ID}/publish")
     releases = admin_api.client.get("/api/admin/knowledge/releases")
+    audits = admin_api.client.get("/api/admin/knowledge/audits?limit=1")
     rollback = admin_api.client.post(
         f"/api/admin/knowledge/releases/{RELEASE_BUILD_ID}/rollback",
         json={"reason": "published the wrong draft"},
@@ -388,6 +413,17 @@ def test_knowledge_admin_routes_use_current_user_and_hide_private_fields(admin_a
     assert publish.json()["kind"] == "validate_draft"
     assert releases.status_code == 200
     assert "collection_name" not in releases.text
+    assert audits.status_code == 200
+    audit_row = audits.json()[0]
+    assert audit_row["action"] == "rollback_release"
+    assert audit_row["result"] == "queued"
+    assert audit_row["actor_user_id"] == "7"
+    assert audit_row["actor_username"] == "metro.admin"
+    assert audit_row["draft_id"] is None
+    assert audit_row["job_id"] == JOB_ID
+    assert audit_row["release_build_id"] == RELEASE_BUILD_ID
+    assert audit_row["reason_summary"] == "restore validated release"
+    assert audit_row["failure_summary"] is None
     assert rollback.status_code == 200
     assert rollback.json()["kind"] == "validate_draft"
     assert jobs.status_code == 200
@@ -422,6 +458,7 @@ def test_knowledge_admin_routes_use_current_user_and_hide_private_fields(admin_a
             },
         ),
         ("list_releases", None),
+        ("list_audit_events", 1),
         (
             "queue_rollback",
             {
@@ -564,10 +601,33 @@ def test_rollback_reason_is_persisted_in_audit_event_via_api(
             f"/api/admin/knowledge/releases/{RELEASE_BUILD_ID}/rollback",
             json={"reason": "restore validated release"},
         )
+        with factory.begin() as session:
+            events = {
+                (event.action, event.result): event
+                for event in session.scalars(select(KnowledgeAdminAuditEvent)).all()
+            }
+            events[("upload_draft", "succeeded")].occurred_at = datetime(
+                2026, 9, 8, 11, 59, tzinfo=UTC
+            )
+            events[("rollback_release", "queued")].occurred_at = datetime(
+                2026, 9, 8, 12, 0, tzinfo=UTC
+            )
+        audits = client.get("/api/admin/knowledge/audits?limit=1")
 
     assert response.status_code == 200
     assert response.json()["kind"] == "rollback_release"
     assert response.json()["status"] == "queued"
+    assert audits.status_code == 200
+    audit_row = audits.json()[0]
+    assert audit_row["action"] == "rollback_release"
+    assert audit_row["result"] == "queued"
+    assert audit_row["actor_user_id"] == str(admin.id)
+    assert audit_row["actor_username"] == admin.username
+    assert audit_row["draft_id"] is None
+    assert audit_row["job_id"] is not None
+    assert audit_row["release_build_id"] == RELEASE_BUILD_ID
+    assert audit_row["reason_summary"] == "restore validated release"
+    assert audit_row["failure_summary"] is None
 
     with factory() as session:
         audit = session.scalar(
