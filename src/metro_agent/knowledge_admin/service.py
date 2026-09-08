@@ -354,7 +354,7 @@ class KnowledgePublisherService:
 
     def _publish_draft(self, job: KnowledgeJob | Any) -> dict[str, Any]:
         draft = self.repository.get_draft(self._required_draft_id(job))
-        self._require_draft_status(draft, "ready_to_publish")
+        self._require_draft_status(draft, "publishing")
         source_root = self._staged_source_root(draft)
         validated_source = validate_source_root(source_root)
         result = self.indexer.build_and_publish_from_staged_source(source_root)
