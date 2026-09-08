@@ -69,6 +69,18 @@ Metro Agent 是面向地铁通信运维场景的多 Agent 助手。本仓库包�
 
 服务端从 Cookie 解析身份，业务归属使用 `owner_id = auth:<id>`。LangGraph checkpoint 使用带身份命名空间的 `auth:<id>:<thread_id>`，长期记忆元数据同样只使用 `auth:<id>`；客户端不能提交 `user_id` 来改变归属。监控接口只允许管理员访问。
 
+## 受治理的知识发布
+
+知识内容按生产资源管理。管理员日常只能通过受保护的网页管理入口上传、查看校验结果、确认发布、查看历史和回滚；普通用户既看不到入口，也不能调用任何知识管理 API。上传只创建草稿，绝不会直接写入 Chroma 或覆盖当前版本。草稿经过完整校验后，管理员（可以是上传者本人）还必须显式点击发布；校验、构建或发布失败均保留草稿与报告，当前已发布版本不变。
+
+网页上传当前只接受一个 `.zip` 知识包，不接受文件夹、单个 Markdown 或其他归档格式。ZIP 的根目录只能包含 Markdown 文档和 `release-smoke-queries.jsonl`；后者为发布校验清单，不进入索引。为防止路径穿越和压缩炸弹，服务端拒绝绝对/逃逸路径、符号链接或 Windows reparse point、重复或非法文件名、嵌套压缩包、可执行或未声明文件。压缩包不得超过 **100 MiB**，解包后总大小不得超过 **500 MiB**，文件数不得超过 **10,000**，每个 Markdown 不得超过 **10 MiB**；资料仍须满足 front matter、有效期和 smoke-query 等受控知识源校验契约。
+
+草稿原 ZIP、受控解包清单、SHA-256、校验报告、不可变 release、chunk artifact、发布任务和管理员审计记录均**永久保留**，不设自动清理任务。审计至少包含管理员身份、动作、draft/release ID、原始文件名、SHA-256、时间、结果、失败摘要和回滚原因；不得由浏览器提交或伪造 `operator`、路径、collection 名或命令。
+
+运行时严格分离读写路径：Web 应用只在管理员鉴权后写入固定类型的受控任务（`validate_draft`、`publish_draft`、`rollback_release`、`get_status`），不持有 Docker socket、shell 权限或 Chroma 连接；单实例发布 worker 才拥有 staging 的读写权限、artifact 写权限、Chroma backend 网络和 Redis 发布锁。应用只经 `knowledge-read-proxy` 查询当前已发布版本；代理仅以只读方式读取 artifact，并拒绝草稿、失败版本、历史 collection 和所有 Chroma 写请求。
+
+回滚仅能由管理员对已有历史 release 发起并填写原因；worker 在同一 Redis 发布锁下原子切换 registry 指针，审计结果。失败、锁冲突或重启期间都不得改变 current release，正在执行的读取可以完成旧版本查询，但单个请求不能混用版本。`knowledge-admin.sh`/`knowledge-admin.ps1` 等包装器只保留给部署和事故处置，固定允许的管理子命令不得由 HTTP 请求、浏览器输入或普通日常操作调用。
+
 ## Legacy Owner 显式迁移
 
 旧版本可能使用自由字符串或裸数字 owner。新账号**绝不自动继承裸数字 owner**，即使旧值刚好等于新的 MySQL 自增 ID。每个旧身份必须由管理员确认后显式映射。

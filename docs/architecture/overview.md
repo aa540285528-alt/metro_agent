@@ -15,7 +15,7 @@ FastAPI
   |-- MySQL：验证账号、会话摘要、角色与审计
   |-- PostgreSQL：会话历史、Trace、工具调用、评测元数据
   |-- Redis：短期 checkpoint，键空间包含 auth:<id>
-  |-- Chroma chroma_db：已发布知识索引
+  |-- knowledge-read-proxy（只读）：当前已发布知识索引
   |-- Chroma memory_chroma_db：按 auth:<id> 隔离的用户长期记忆
   `-- 工具/模型提供商：受网络和凭据边界约束
 ```
@@ -44,6 +44,33 @@ Compose 网络不发布 MySQL、PostgreSQL 或 Redis 端口。应用仅发布到
 
 短期会话检查点使用 LangGraph Redis checkpointer，依赖 Redis Search 的 `FT.*` 命令。Compose 固定使用内置 Search 能力的 Redis 8，并在健康检查中验证 `FT.INFO` 可用；普通 Redis 7 镜像不能替代。
 
+## 受治理知识发布
+
+知识管理与线上查询是两条不同的路径：
+
+```text
+管理员浏览器
+  -> FastAPI 管理 API（require_admin；只创建固定类型任务）
+  -> 持久化草稿/任务/审计元数据
+  -> 单实例 knowledge publication worker
+       -> staging（原 ZIP、受控解包源、校验报告）
+       -> Redis knowledge:publication 锁
+       -> Chroma backend（构建、发布、回滚） + artifact 卷
+
+普通/管理员查询
+  -> FastAPI
+  -> knowledge-read-proxy（artifact 只读，校验 current descriptor）
+  -> Chroma backend 的当前 collection
+```
+
+网页是管理员日常上传、校验、确认发布、查看历史和回滚的唯一入口。其 API 只接受服务端校验的 draft/release ID 与固定任务类型：`validate_draft`、`publish_draft`、`rollback_release`、`get_status`；不得传入命令、路径、操作者、collection 名或 Docker 参数。Web 应用、普通查询路径和 read-proxy 都不能读取 staging、写 artifact、直接连接 Chroma backend、访问 Docker socket 或启动 shell。worker 以最小权限独占 staging 读写、artifact 写入、backend 网络和 Redis 发布锁；它不是通用命令执行器。
+
+上传只接收单个 `.zip` 包：根目录仅允许 Markdown 与 `release-smoke-queries.jsonl`。服务端在解包前后实施以下固定上限：压缩包最多 100 MiB，解包后合计最多 500 MiB，至多 10,000 个文件，每个 Markdown 最多 10 MiB。绝对或逃逸路径、符号链接/reparse point、重复或非法名称、嵌套归档、可执行或未声明文件一律失败关闭。解包资料还必须通过受控知识源的 metadata、日期、大小和 smoke-query 校验；上传完成不等于校验通过，更不等于发布。
+
+发布 worker 仅在草稿处于 `ready_to_publish` 时重新执行关键校验、构建新的不可变 release 与 artifact，并在 Redis 锁内原子更新 current/previous registry 指针。任一步失败、锁冲突或 worker 重启均不修改 current release；进行中的读取可完成旧版本，单个读取请求不能混用版本。回滚由管理员针对已有历史 release 提交原因，同样经过 worker 与发布锁，不会重建或删除历史版本。
+
+原始 ZIP、解包清单、哈希、校验报告、release、artifact、任务与审计记录永久保留，不设置自动清理。审计字段至少包括管理员身份、动作、draft/release ID、原始文件名、SHA-256、时间、结果、失败摘要和回滚原因。仅部署和事故处置可使用固定命令白名单的 `knowledge-admin.sh`/`knowledge-admin.ps1` 包装器；它们不能被 Web 请求触发，也不是日常发布入口。
+
 ## 可观测性与 Langfuse 边界
 
 PostgreSQL 本地业务 Trace 是会话、工具、RAG artifact 与验收记录的权威关联，不由 Langfuse 替换。未来接入 Langfuse 时，只将其作为外部 LLMOps 平面，用于 Prompt 版本、数据集、自动/人工评测和跨版本比较；必须先完成敏感字段脱敏、租户/项目隔离、数据保留期限、出口网络审批和不可用时降级。
@@ -53,4 +80,4 @@ PostgreSQL 本地业务 Trace 是会话、工具、RAG artifact 与验收记录�
 - 登录限流为单进程内存状态，多副本必须改成共享原子存储。
 - 同步 Agent 不能在模型或工具执行中途协作取消；禁用即时生效仅覆盖下一次鉴权和历史写入前复核。
 - 当前没有 SSO、自注册和密码找回。
-- 知识库权限、工具最小权限和写操作审批不属于本次认证边界。
+- 知识发布已实行管理员网页入口、最小权限 worker 与只读查询隔离；细粒度文档授权和多级内容审批仍不在当前试点范围。
