@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -15,6 +15,8 @@ from metro_agent.api import create_app
 from metro_agent.auth.dependencies import CurrentUser
 from metro_agent.auth.models import AuthBase
 from metro_agent.auth.service import AuthService
+from metro_agent.knowledge_admin.models import Base as KnowledgeAdminBase, KnowledgeAdminAuditEvent
+from metro_agent.knowledge_admin.repository import KnowledgeAdminRepository
 from metro_agent.knowledge_admin.service import (
     KnowledgeAdminInvalidStateError,
     KnowledgeAdminMalformedRequestError,
@@ -500,6 +502,85 @@ def test_knowledge_admin_status_mappings(
     assert response.status_code == status
 
 
+def test_rollback_reason_is_persisted_in_audit_event_via_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTH_COOKIE_SECURE", "false")
+    monkeypatch.setenv("AUTH_SESSION_TTL_SECONDS", "3600")
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    AuthBase.metadata.create_all(engine)
+    KnowledgeAdminBase.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    auth_service = AuthService(factory, session_pepper="knowledge-admin-test-pepper")
+    admin = auth_service.create_user(
+        "metro.admin", "CorrectHorseBattery1", "admin", None
+    )
+    repo = KnowledgeAdminRepository(factory)
+    draft = repo.create_draft(
+        original_filename="knowledge.zip",
+        package_sha256="a" * 64,
+        package_size_bytes=42,
+        storage_key="drafts/private/a/knowledge.zip",
+        actor_user_id=admin.id,
+        actor_username=admin.username,
+    )
+    repo.record_release(
+        build_id=RELEASE_BUILD_ID,
+        collection_name="private-rollback",
+        artifact_sha256="b" * 64,
+        source_manifest_sha256="c" * 64,
+        draft_id=draft.id,
+        document_count=1,
+        validation_summary={"valid": True},
+        published_at=NOW,
+    )
+
+    app = create_app(
+        graph_factory=lambda: object(),
+        history_service_factory=lambda: SimpleNamespace(),
+        monitoring_service_factory=lambda: SimpleNamespace(),
+        auth_service_factory=lambda: auth_service,
+        knowledge_admin_service_factory=lambda: KnowledgeAdminService(repository=repo),
+        chat_runner=lambda *_args, **_kwargs: "answer",
+        knowledge_preflight=lambda: None,
+    )
+
+    with TestClient(app, base_url="http://testserver") as client:
+        assert (
+            login(client, "metro.admin", "CorrectHorseBattery1").status_code == 200
+        )
+        response = client.post(
+            f"/api/admin/knowledge/releases/{RELEASE_BUILD_ID}/rollback",
+            json={"reason": "restore validated release"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["kind"] == "rollback_release"
+    assert response.json()["status"] == "queued"
+
+    with factory() as session:
+        audit = session.scalar(
+            select(KnowledgeAdminAuditEvent).where(
+                KnowledgeAdminAuditEvent.action == "rollback_release",
+                KnowledgeAdminAuditEvent.result == "queued",
+                KnowledgeAdminAuditEvent.release_build_id == RELEASE_BUILD_ID,
+            )
+        )
+    assert audit is not None
+    assert audit.reason_summary == "restore validated release"
+
+
 def test_upload_forwards_multipart_without_browser_cookie_and_uses_timeouts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -561,3 +642,59 @@ def test_upload_forwards_multipart_without_browser_cookie_and_uses_timeouts(
     assert timeout.read is not None
     assert timeout.write is not None
     assert timeout.pool is not None
+
+
+@pytest.mark.parametrize(
+    "status_code,expected_exception,expected_message",
+    [
+        (500, KnowledgeAdminWorkerUnavailableError, "publisher worker unavailable"),
+        (502, KnowledgeAdminWorkerUnavailableError, "publisher worker unavailable"),
+        (504, KnowledgeAdminWorkerUnavailableError, "publisher worker unavailable"),
+        (400, KnowledgeAdminMalformedRequestError, "publisher worker rejected upload"),
+        (422, KnowledgeAdminMalformedRequestError, "publisher worker rejected upload"),
+    ],
+)
+def test_upload_response_status_codes_map_to_expected_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+    expected_exception: type[Exception],
+    expected_message: str,
+) -> None:
+    class FakeResponse:
+        def __init__(self, code: int) -> None:
+            self.status_code = code
+
+        def json(self) -> dict[str, object]:
+            return {
+                "draft_id": DRAFT_ID,
+                "job_id": JOB_ID,
+                "status": "queued",
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, *, timeout) -> None:
+            self.timeout = timeout
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse(status_code)
+
+    monkeypatch.setattr(
+        "metro_agent.knowledge_admin.service.httpx.AsyncClient",
+        FakeAsyncClient,
+    )
+    service = KnowledgeAdminService(
+        repository=SimpleNamespace(),
+        worker_base_url="http://knowledge-publisher:8000",
+        internal_bearer_secret="publisher-secret",
+    )
+    package = SimpleNamespace(filename="knowledge.zip", file=BytesIO(b"zip-bytes"))
+    current_user = CurrentUser(id=17, username="metro.admin", role="admin")
+
+    with pytest.raises(expected_exception, match=expected_message):
+        asyncio.run(service.upload_draft(package=package, current_user=current_user))

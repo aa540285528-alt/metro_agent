@@ -473,6 +473,7 @@ class KnowledgeAdminRepository:
                 draft_id=draft_id,
                 job_id=job_id,
                 release_build_id=release_build_id,
+                reason_summary=reason_summary[:512] if reason_summary else None,
                 failure_summary=failure_summary[:512] if failure_summary else None,
             )
         )

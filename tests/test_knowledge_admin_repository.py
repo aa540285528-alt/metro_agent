@@ -306,8 +306,20 @@ def test_dedicated_rollback_completion_records_success_after_target_restore(
         published_at=datetime(2026, 9, 7, tzinfo=UTC),
     )
     queued = repository.queue_rollback(
-        "build-restored", actor_user_id="42", actor_username="admin"
+        "build-restored",
+        actor_user_id="42",
+        actor_username="admin",
+        reason_summary="restore the validated release",
     )
+    with session_factory() as session:
+        queued_audit = session.scalar(
+            select(KnowledgeAdminAuditEvent).where(
+                KnowledgeAdminAuditEvent.job_id == queued.id,
+                KnowledgeAdminAuditEvent.result == "queued",
+            )
+        )
+        assert queued_audit is not None
+        assert queued_audit.reason_summary == "restore the validated release"
     repository.claim_next_job()
 
     repository.complete_rollback_job(queued.id, "build-restored")

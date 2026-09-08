@@ -109,7 +109,7 @@ class KnowledgeAdminService:
             raise KnowledgeAdminWorkerUnavailableError("publisher worker timed out") from exc
         except httpx.HTTPError as exc:
             raise KnowledgeAdminWorkerUnavailableError("publisher worker unavailable") from exc
-        if response.status_code == 503:
+        if 500 <= response.status_code < 600:
             raise KnowledgeAdminWorkerUnavailableError("publisher worker unavailable")
         if response.status_code >= 400:
             raise KnowledgeAdminMalformedRequestError("publisher worker rejected upload")
