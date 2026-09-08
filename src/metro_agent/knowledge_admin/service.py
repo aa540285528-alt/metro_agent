@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -55,19 +56,40 @@ class KnowledgePublisherService:
         staged = stage_zip_knowledge_package(
             package_path, draft_id=draft_id, staging_root=self.staging_root
         )
-        draft = self.repository.create_draft(
-            original_filename=original_filename,
-            package_sha256=staged.package_sha256,
-            package_size_bytes=staged.package_size_bytes,
-            storage_key=draft_id,
-            actor_user_id=self.internal_actor_user_id,
-            actor_username=self.internal_actor_username,
-        )
-        job = self.repository.queue_validation(
-            draft.id,
-            actor_user_id=self.internal_actor_user_id,
-            actor_username=self.internal_actor_username,
-        )
+        try:
+            create_and_queue = getattr(
+                self.repository, "create_draft_and_queue_validation"
+            )
+        except AttributeError:
+            create_and_queue = None
+
+        try:
+            if callable(create_and_queue):
+                draft, job = create_and_queue(
+                    original_filename=original_filename,
+                    package_sha256=staged.package_sha256,
+                    package_size_bytes=staged.package_size_bytes,
+                    storage_key=draft_id,
+                    actor_user_id=self.internal_actor_user_id,
+                    actor_username=self.internal_actor_username,
+                )
+            else:
+                draft = self.repository.create_draft(
+                    original_filename=original_filename,
+                    package_sha256=staged.package_sha256,
+                    package_size_bytes=staged.package_size_bytes,
+                    storage_key=draft_id,
+                    actor_user_id=self.internal_actor_user_id,
+                    actor_username=self.internal_actor_username,
+                )
+                job = self.repository.queue_validation(
+                    draft.id,
+                    actor_user_id=self.internal_actor_user_id,
+                    actor_username=self.internal_actor_username,
+                )
+        except Exception:
+            shutil.rmtree(staged.source_root, ignore_errors=True)
+            raise
         return {"draft_id": draft.id, "job_id": job.id, "status": "queued"}
 
     def process_job(self, job: KnowledgeJob | Any) -> dict[str, Any]:

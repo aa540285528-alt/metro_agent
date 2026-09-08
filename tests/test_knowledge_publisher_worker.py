@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import shutil
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -100,6 +102,31 @@ class FakeRepository:
         self.jobs[job.id] = job
         self.drafts[draft_id].status = "validating"
         return job
+
+    def create_draft_and_queue_validation(
+        self,
+        *,
+        original_filename: str,
+        package_sha256: str,
+        package_size_bytes: int,
+        storage_key: str,
+        actor_user_id: str,
+        actor_username: str,
+    ) -> tuple[SimpleNamespace, SimpleNamespace]:
+        draft = self.create_draft(
+            original_filename=original_filename,
+            package_sha256=package_sha256,
+            package_size_bytes=package_size_bytes,
+            storage_key=storage_key,
+            actor_user_id=actor_user_id,
+            actor_username=actor_username,
+        )
+        job = self.queue_validation(
+            draft.id,
+            actor_user_id=actor_user_id,
+            actor_username=actor_username,
+        )
+        return draft, job
 
     def get_draft(self, draft_id: str) -> SimpleNamespace:
         return self.drafts[draft_id]
@@ -280,6 +307,106 @@ def test_failed_job_summary_is_sanitized_before_persistence(
         assert "validation failed" in failure_summary
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)
+
+
+def test_internal_draft_upload_removes_staged_source_when_repository_call_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    temp_root = SCRATCH_ROOT / f"publisher-{uuid4().hex}"
+    temp_root.mkdir(parents=True, exist_ok=False)
+    try:
+        repo = FakeRepository()
+        service = KnowledgePublisherService(
+            repository=repo,
+            staging_root=temp_root / "staging",
+            artifact_root=temp_root / "artifacts",
+            indexer=FakeIndexer(),
+            chroma_client=object(),
+            redis_client=object(),
+        )
+        package_path = temp_root / "knowledge.zip"
+        package_path.write_bytes(b"zip-bytes")
+        staged_root = temp_root / "staging" / "draft-123"
+
+        def fake_stage(package: Path, *, draft_id: str, staging_root: Path) -> SimpleNamespace:
+            assert package == package_path
+            assert draft_id == "draft-123"
+            assert staging_root == temp_root / "staging"
+            staged_root.mkdir(parents=True, exist_ok=True)
+            return SimpleNamespace(
+                package_sha256="a" * 64,
+                package_size_bytes=17,
+                source_root=staged_root,
+                validated_source=SimpleNamespace(
+                    root=staged_root,
+                    documents=(),
+                    smoke_queries=(),
+                    source_tree_sha256="b" * 64,
+                    git_commit=None,
+                ),
+            )
+
+        monkeypatch.setattr(
+            "metro_agent.knowledge_admin.service.stage_zip_knowledge_package",
+            fake_stage,
+        )
+        monkeypatch.setattr(
+            "metro_agent.knowledge_admin.service.uuid4",
+            lambda: SimpleNamespace(hex="draft-123"),
+        )
+        monkeypatch.setattr(
+            repo,
+            "create_draft_and_queue_validation",
+            lambda **_: (_ for _ in ()).throw(RuntimeError("database unavailable")),
+        )
+
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            service.ingest_draft(package_path, original_filename="knowledge.zip")
+
+        assert not staged_root.exists()
+        assert repo.created_drafts == []
+        assert repo.queued_jobs == []
+    finally:
+        shutil.rmtree(temp_root, ignore_errors=True)
+
+
+def test_worker_lifespan_processes_jobs_and_stops_gracefully() -> None:
+    class ConsumerService:
+        def __init__(self) -> None:
+            self.staging_root = Path("ignored")
+            self.calls = ["validate_draft", "publish_draft", "rollback_release", "get_status"]
+            self.processed: list[str] = []
+            self.started = threading.Event()
+
+        def process_next_job(self) -> dict[str, str] | None:
+            self.started.set()
+            if not self.calls:
+                return None
+            job_kind = self.calls.pop(0)
+            self.processed.append(job_kind)
+            return {"kind": job_kind}
+
+    service = ConsumerService()
+    app = create_app(
+        service=service,
+        internal_bearer_secret="publisher-secret",
+        job_consumer_poll_interval_seconds=0.01,
+    )
+
+    with TestClient(app):
+        assert service.started.wait(timeout=2)
+        deadline = time.monotonic() + 2
+        while len(service.processed) < 4 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert service.processed == [
+            "validate_draft",
+            "publish_draft",
+            "rollback_release",
+            "get_status",
+        ]
+
+    assert app.state.job_consumer_stop.is_set()
+    assert app.state.job_consumer_task.done()
 
 
 def test_fixed_jobs_validate_publish_rollback_and_get_status_run_in_python_only(

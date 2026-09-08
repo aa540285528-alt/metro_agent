@@ -70,6 +70,30 @@ def test_queue_validation_commits_transition_job_and_audit_event(
         assert audit.result == "queued"
 
 
+def test_create_draft_and_queue_validation_rolls_back_partial_work_when_enqueue_fails(
+    repository: KnowledgeAdminRepository, session_factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(*_: object, **__: object) -> object:
+        raise RuntimeError("enqueue failed")
+
+    monkeypatch.setattr(repository, "_enqueue", boom)
+
+    with pytest.raises(RuntimeError, match="enqueue failed"):
+        repository.create_draft_and_queue_validation(
+            original_filename="knowledge.zip",
+            package_sha256="a" * 64,
+            package_size_bytes=42,
+            storage_key="drafts/private/a/knowledge.zip",
+            actor_user_id="42",
+            actor_username="admin",
+        )
+
+    with session_factory() as session:
+        assert session.scalar(select(KnowledgeDraft)) is None
+        assert session.scalar(select(KnowledgeJob)) is None
+        assert session.scalar(select(KnowledgeAdminAuditEvent)) is None
+
+
 def test_claiming_a_job_uses_postgres_skip_locked_and_only_claims_known_kinds(
     repository: KnowledgeAdminRepository,
 ) -> None:

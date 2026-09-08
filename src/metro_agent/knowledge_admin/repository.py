@@ -69,6 +69,46 @@ class KnowledgeAdminRepository:
             )
         return draft
 
+    def create_draft_and_queue_validation(
+        self,
+        *,
+        original_filename: str,
+        package_sha256: str,
+        package_size_bytes: int,
+        storage_key: str,
+        actor_user_id: str,
+        actor_username: str,
+    ) -> tuple[KnowledgeDraft, KnowledgeJob]:
+        with self._session_factory() as session, session.begin():
+            draft = KnowledgeDraft(
+                original_filename=original_filename,
+                package_sha256=package_sha256,
+                package_size_bytes=package_size_bytes,
+                storage_key=storage_key,
+                actor_user_id=actor_user_id,
+                actor_username=actor_username,
+                status="uploaded",
+            )
+            session.add(draft)
+            session.flush()
+            self._audit(
+                session,
+                action="upload_draft",
+                result="succeeded",
+                actor_user_id=actor_user_id,
+                actor_username=actor_username,
+                draft_id=draft.id,
+            )
+            transition_draft(draft, "validating")
+            job = self._enqueue(
+                session,
+                kind="validate_draft",
+                draft_id=draft.id,
+                actor_user_id=actor_user_id,
+                actor_username=actor_username,
+            )
+        return draft, job
+
     def queue_validation(
         self, draft_id: str, *, actor_user_id: str, actor_username: str
     ) -> KnowledgeJob:
