@@ -1,12 +1,464 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
+import shutil
+from types import SimpleNamespace
+from uuid import uuid4
+from zipfile import ZIP_DEFLATED, ZipFile
 
+import pytest
 import yaml
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from metro_agent.api import create_app
+from metro_agent.auth.models import AuthBase
+from metro_agent.auth.service import AuthService
+from metro_agent.knowledge_admin.models import Base as KnowledgeAdminBase
+from metro_agent.knowledge_admin.repository import KnowledgeAdminRepository
+from metro_agent.knowledge_admin.service import (
+    KnowledgeAdminService,
+    KnowledgePublisherService,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 OPERATIONS = ROOT / "deploy" / "operations"
+OLD_BUILD_ID = "build-old"
+NEW_BUILD_ID = "build-new"
+
+
+def _knowledge_package() -> bytes:
+    metadata = (
+        "---\n"
+        "owner: Metro Operations\n"
+        "source: Acceptance fixture\n"
+        "updated: 2026-09-08\n"
+        "effective_date: 2026-09-08\n"
+        "expires_at: 2099-12-31\n"
+        "risk_level: general\n"
+        "---\n"
+        "The governed acceptance source.\n"
+    )
+    package = BytesIO()
+    with ZipFile(package, "w", ZIP_DEFLATED) as archive:
+        archive.writestr("rules.md", metadata)
+        archive.writestr(
+            "release-smoke-queries.jsonl",
+            '{"query":"acceptance","expected_source":"rules.md","minimum_matches":1}\n',
+        )
+    return package.getvalue()
+
+
+class _FakePublishedQuery:
+    """Deterministic stand-in for the published-only knowledge query path."""
+
+    def __init__(self, build_id: str) -> None:
+        self.build_id = build_id
+
+    def query(self) -> dict[str, str]:
+        return {"build_id": self.build_id, "source": "rules.md"}
+
+
+class _FakeControlledIndexer:
+    """A no-network indexer that moves the visible pointer only on success."""
+
+    def __init__(self, query: _FakePublishedQuery) -> None:
+        self.query = query
+        self.calls: list[Path] = []
+        self.fail_publish = False
+
+    def build_and_publish_from_staged_source(self, source_root: Path) -> dict[str, str]:
+        self.calls.append(source_root)
+        if self.fail_publish:
+            raise RuntimeError("deterministic publish failure")
+        self.query.build_id = NEW_BUILD_ID
+        return {"status": "published", "build_id": NEW_BUILD_ID}
+
+
+class _InProcessPublisherGateway(KnowledgeAdminService):
+    """Exercise the web boundary while keeping the controlled worker in-process."""
+
+    def __init__(
+        self,
+        *,
+        repository: KnowledgeAdminRepository,
+        publisher: KnowledgePublisherService,
+        upload_root: Path,
+    ) -> None:
+        super().__init__(repository=repository)
+        self.publisher = publisher
+        self.upload_root = upload_root
+        self.forwarded_actors: list[tuple[str, str]] = []
+
+    async def upload_draft(self, *, package, current_user=None) -> dict[str, object]:
+        self.upload_root.mkdir(parents=True, exist_ok=True)
+        package_path = self.upload_root / "incoming.zip"
+        package_path.write_bytes(package.file.read())
+        try:
+            self.forwarded_actors.append(
+                (str(current_user.id), current_user.username)
+            )
+            return self.publisher.ingest_draft(
+                package_path,
+                original_filename=package.filename or "knowledge.zip",
+                actor_user_id=str(current_user.id),
+                actor_username=current_user.username,
+            )
+        finally:
+            package_path.unlink(missing_ok=True)
+
+
+class _NoNetworkPublicationLock:
+    def __init__(self, *_args: object) -> None:
+        self.assertions = 0
+
+    def __enter__(self) -> _NoNetworkPublicationLock:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def assert_held(self) -> None:
+        self.assertions += 1
+
+
+@pytest.fixture
+def governed_web_knowledge(monkeypatch: pytest.MonkeyPatch):
+    """A public-admin API plus real worker/repository, without Docker or live services."""
+    monkeypatch.setenv("AUTH_COOKIE_SECURE", "false")
+    monkeypatch.setenv("AUTH_SESSION_TTL_SECONDS", "3600")
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(dbapi_connection, _connection_record) -> None:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    scratch = ROOT / f".knowledge-e2e-contract-{uuid4().hex}"
+    scratch.mkdir()
+    try:
+        AuthBase.metadata.create_all(engine)
+        KnowledgeAdminBase.metadata.create_all(engine)
+        factory = sessionmaker(bind=engine, expire_on_commit=False)
+        auth = AuthService(factory, session_pepper="governed-web-knowledge-test")
+        admin = auth.create_user("knowledge.admin", "CorrectHorseBattery1", "admin", None)
+        user = auth.create_user("knowledge.user", "CorrectHorseBattery2", "user", admin.id)
+        repository = KnowledgeAdminRepository(factory)
+        query = _FakePublishedQuery(OLD_BUILD_ID)
+        indexer = _FakeControlledIndexer(query)
+
+        def read_validated_release(_root: Path, build_id: str) -> SimpleNamespace:
+            assert build_id == NEW_BUILD_ID
+            return SimpleNamespace(
+                build_id=build_id,
+                collection_name=f"private-collection__build_{build_id}",
+                sha256="a" * 64,
+                source_tree_sha256="b" * 64,
+            )
+
+        def restore_validated_release(
+            _client: object,
+            _root: Path,
+            build_id: str,
+            *,
+            before_publish,
+        ) -> SimpleNamespace:
+            before_publish()
+            query.build_id = build_id
+            return SimpleNamespace(current_build_id=build_id)
+
+        monkeypatch.setattr(
+            "metro_agent.knowledge_admin.service.read_validated_release",
+            read_validated_release,
+        )
+        monkeypatch.setattr(
+            "metro_agent.knowledge_admin.service.restore_validated_release",
+            restore_validated_release,
+        )
+        monkeypatch.setattr(
+            "metro_agent.knowledge_admin.service.PublicationLock",
+            _NoNetworkPublicationLock,
+        )
+        publisher = KnowledgePublisherService(
+            repository=repository,
+            staging_root=scratch / "staging",
+            artifact_root=scratch / "artifacts",
+            indexer=indexer,
+            chroma_client=object(),
+            redis_client=object(),
+        )
+        service = _InProcessPublisherGateway(
+            repository=repository,
+            publisher=publisher,
+            upload_root=scratch / "incoming",
+        )
+        app = create_app(
+            graph_factory=lambda: object(),
+            history_service_factory=lambda: SimpleNamespace(),
+            monitoring_service_factory=lambda: SimpleNamespace(),
+            auth_service_factory=lambda: auth,
+            knowledge_admin_service_factory=lambda: service,
+            chat_runner=lambda *_args, **_kwargs: "answer",
+            knowledge_preflight=lambda: None,
+        )
+        with TestClient(app, base_url="http://testserver") as client:
+            yield SimpleNamespace(
+                client=client,
+                factory=factory,
+                repository=repository,
+                publisher=publisher,
+                service=service,
+                indexer=indexer,
+                query=query,
+                admin=admin,
+                user=user,
+            )
+    finally:
+        engine.dispose()
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _login(client: TestClient, username: str, password: str) -> None:
+    response = client.post("/api/auth/login", json={"username": username, "password": password})
+    assert response.status_code == 200
+
+
+def _seed_old_release(governed_web_knowledge) -> None:
+    draft = governed_web_knowledge.repository.create_draft(
+        original_filename="old-release.zip",
+        package_sha256="c" * 64,
+        package_size_bytes=1,
+        storage_key="old-release",
+        actor_user_id=str(governed_web_knowledge.admin.id),
+        actor_username=governed_web_knowledge.admin.username,
+    )
+    governed_web_knowledge.repository.record_release(
+        build_id=OLD_BUILD_ID,
+        collection_name="private-collection__build_old",
+        artifact_sha256="d" * 64,
+        source_manifest_sha256="e" * 64,
+        draft_id=draft.id,
+        document_count=1,
+        validation_summary={"status": "valid"},
+        published_at=datetime(2026, 9, 8, tzinfo=UTC),
+    )
+
+
+def _upload_valid_draft(governed_web_knowledge) -> tuple[str, str]:
+    response = governed_web_knowledge.client.post(
+        "/api/admin/knowledge/drafts",
+        files={"package": ("knowledge.zip", _knowledge_package(), "application/zip")},
+    )
+    assert response.status_code == 201
+    assert response.json()["status"] == "queued"
+    return response.json()["draft_id"], response.json()["job_id"]
+
+
+def test_non_admin_is_denied_governed_web_knowledge_actions(
+    governed_web_knowledge,
+) -> None:
+    _seed_old_release(governed_web_knowledge)
+    _login(
+        governed_web_knowledge.client,
+        "knowledge.user",
+        "CorrectHorseBattery2",
+    )
+
+    requests = (
+        ("GET", "/api/admin/knowledge/drafts", {}),
+        ("GET", "/api/admin/knowledge/releases", {}),
+        (
+            "POST",
+            "/api/admin/knowledge/drafts",
+            {"files": {"package": ("knowledge.zip", _knowledge_package(), "application/zip")}},
+        ),
+        (
+            "POST",
+            "/api/admin/knowledge/drafts/11111111-1111-4111-8111-111111111111/publish",
+            {},
+        ),
+        (
+            "POST",
+            f"/api/admin/knowledge/releases/{OLD_BUILD_ID}/rollback",
+            {"json": {"reason": "not an administrator"}},
+        ),
+    )
+    for method, path, kwargs in requests:
+        response = governed_web_knowledge.client.request(method, path, **kwargs)
+        assert response.status_code == 403
+
+    assert governed_web_knowledge.indexer.calls == []
+    assert governed_web_knowledge.query.query()["build_id"] == OLD_BUILD_ID
+
+
+def test_invalid_staged_upload_validation_preserves_old_published_release(
+    governed_web_knowledge,
+) -> None:
+    _seed_old_release(governed_web_knowledge)
+    _login(
+        governed_web_knowledge.client,
+        "knowledge.admin",
+        "CorrectHorseBattery1",
+    )
+    draft_id, validation_job_id = _upload_valid_draft(governed_web_knowledge)
+    draft = governed_web_knowledge.repository.get_draft(draft_id)
+    staged_rules = governed_web_knowledge.publisher.staging_root / draft.storage_key / "rules.md"
+    staged_rules.write_text("---\nowner: missing required metadata\n---\n", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        governed_web_knowledge.publisher.process_next_job()
+
+    job = governed_web_knowledge.client.get(
+        f"/api/admin/knowledge/jobs/{validation_job_id}"
+    )
+    refreshed_draft = governed_web_knowledge.client.get(
+        f"/api/admin/knowledge/drafts/{draft_id}"
+    )
+    releases = governed_web_knowledge.client.get("/api/admin/knowledge/releases")
+
+    assert job.status_code == 200
+    assert job.json()["status"] == "failed"
+    assert refreshed_draft.status_code == 200
+    assert refreshed_draft.json()["status"] == "validation_failed"
+    assert releases.status_code == 200
+    assert releases.json()[0]["build_id"] == OLD_BUILD_ID
+    assert releases.json()[0]["status"] == "current"
+    assert governed_web_knowledge.indexer.calls == []
+    assert governed_web_knowledge.query.query()["build_id"] == OLD_BUILD_ID
+
+
+def test_admin_uploader_self_publishes_only_through_controlled_job(
+    governed_web_knowledge,
+) -> None:
+    _seed_old_release(governed_web_knowledge)
+    _login(
+        governed_web_knowledge.client,
+        "knowledge.admin",
+        "CorrectHorseBattery1",
+    )
+    draft_id, _ = _upload_valid_draft(governed_web_knowledge)
+
+    validation = governed_web_knowledge.publisher.process_next_job()
+    publish = governed_web_knowledge.client.post(
+        f"/api/admin/knowledge/drafts/{draft_id}/publish"
+    )
+
+    assert validation is not None
+    assert validation["status"] == "valid"
+    assert publish.status_code == 200
+    assert publish.json()["kind"] == "publish_draft"
+    assert governed_web_knowledge.indexer.calls == []
+
+    completed_publish = governed_web_knowledge.publisher.process_next_job()
+    releases = governed_web_knowledge.client.get("/api/admin/knowledge/releases")
+    audits = governed_web_knowledge.client.get("/api/admin/knowledge/audits?limit=50")
+
+    assert completed_publish == {"status": "published", "build_id": NEW_BUILD_ID}
+    assert len(governed_web_knowledge.indexer.calls) == 1
+    assert governed_web_knowledge.service.forwarded_actors == [
+        (str(governed_web_knowledge.admin.id), "knowledge.admin")
+    ]
+    assert releases.status_code == 200
+    by_build_id = {release["build_id"]: release for release in releases.json()}
+    assert by_build_id[NEW_BUILD_ID]["status"] == "current"
+    assert by_build_id[OLD_BUILD_ID]["status"] == "superseded"
+    assert governed_web_knowledge.query.query()["build_id"] == NEW_BUILD_ID
+    assert any(
+        event["action"] == "publish_draft"
+        and event["result"] == "succeeded"
+        and event["actor_username"] == "knowledge.admin"
+        for event in audits.json()
+    )
+
+
+def test_publish_failure_preserves_old_release_and_published_query_path(
+    governed_web_knowledge,
+) -> None:
+    _seed_old_release(governed_web_knowledge)
+    _login(
+        governed_web_knowledge.client,
+        "knowledge.admin",
+        "CorrectHorseBattery1",
+    )
+    draft_id, _ = _upload_valid_draft(governed_web_knowledge)
+    governed_web_knowledge.publisher.process_next_job()
+    publish = governed_web_knowledge.client.post(
+        f"/api/admin/knowledge/drafts/{draft_id}/publish"
+    )
+    governed_web_knowledge.indexer.fail_publish = True
+
+    with pytest.raises(RuntimeError, match="deterministic publish failure"):
+        governed_web_knowledge.publisher.process_next_job()
+
+    job = governed_web_knowledge.client.get(
+        f"/api/admin/knowledge/jobs/{publish.json()['id']}"
+    )
+    draft = governed_web_knowledge.client.get(f"/api/admin/knowledge/drafts/{draft_id}")
+    releases = governed_web_knowledge.client.get("/api/admin/knowledge/releases")
+
+    assert job.status_code == 200
+    assert job.json()["status"] == "failed"
+    assert draft.status_code == 200
+    assert draft.json()["status"] == "publish_failed"
+    assert [release["build_id"] for release in releases.json()] == [OLD_BUILD_ID]
+    assert releases.json()[0]["status"] == "current"
+    assert governed_web_knowledge.query.query()["build_id"] == OLD_BUILD_ID
+
+
+def test_admin_rollback_restores_release_and_leaves_audit_evidence(
+    governed_web_knowledge,
+) -> None:
+    _seed_old_release(governed_web_knowledge)
+    _login(
+        governed_web_knowledge.client,
+        "knowledge.admin",
+        "CorrectHorseBattery1",
+    )
+    draft_id, _ = _upload_valid_draft(governed_web_knowledge)
+    governed_web_knowledge.publisher.process_next_job()
+    governed_web_knowledge.client.post(f"/api/admin/knowledge/drafts/{draft_id}/publish")
+    governed_web_knowledge.publisher.process_next_job()
+
+    rollback = governed_web_knowledge.client.post(
+        f"/api/admin/knowledge/releases/{OLD_BUILD_ID}/rollback",
+        json={"reason": "restore the known good release"},
+    )
+    completed_rollback = governed_web_knowledge.publisher.process_next_job()
+    releases = governed_web_knowledge.client.get("/api/admin/knowledge/releases")
+    audits = governed_web_knowledge.client.get("/api/admin/knowledge/audits?limit=50")
+
+    assert rollback.status_code == 200
+    assert rollback.json()["kind"] == "rollback_release"
+    assert completed_rollback == {"status": "rolled_back", "build_id": OLD_BUILD_ID}
+    by_build_id = {release["build_id"]: release for release in releases.json()}
+    assert by_build_id[OLD_BUILD_ID]["status"] == "current"
+    assert by_build_id[NEW_BUILD_ID]["status"] == "rolled_back"
+    assert governed_web_knowledge.query.query()["build_id"] == OLD_BUILD_ID
+    rollback_events = [
+        event
+        for event in audits.json()
+        if event["action"] == "rollback_release"
+        and event["release_build_id"] == OLD_BUILD_ID
+    ]
+    assert {event["result"] for event in rollback_events} == {
+        "queued",
+        "running",
+        "succeeded",
+    }
+    assert any(
+        event["reason_summary"] == "restore the known good release"
+        and event["actor_username"] == "knowledge.admin"
+        for event in rollback_events
+    )
 
 
 def _compose() -> dict[str, object]:
