@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 import shutil
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -24,6 +25,7 @@ from metro_agent.knowledge_admin.service import (
     KnowledgeAdminService,
     KnowledgePublisherService,
 )
+from metro_agent.knowledge_admin.worker import create_app as create_publisher_worker_app
 
 ROOT = Path(__file__).resolve().parents[1]
 OPERATIONS = ROOT / "deploy" / "operations"
@@ -79,37 +81,20 @@ class _FakeControlledIndexer:
         return {"status": "published", "build_id": NEW_BUILD_ID}
 
 
-class _InProcessPublisherGateway(KnowledgeAdminService):
-    """Exercise the web boundary while keeping the controlled worker in-process."""
+class _WorkerInternalHttpClient:
+    """Route the app's real internal HTTP request through the worker ASGI app."""
 
-    def __init__(
-        self,
-        *,
-        repository: KnowledgeAdminRepository,
-        publisher: KnowledgePublisherService,
-        upload_root: Path,
-    ) -> None:
-        super().__init__(repository=repository)
-        self.publisher = publisher
-        self.upload_root = upload_root
-        self.forwarded_actors: list[tuple[str, str]] = []
+    def __init__(self, worker_client: TestClient, **_kwargs: object) -> None:
+        self.worker_client = worker_client
 
-    async def upload_draft(self, *, package, current_user=None) -> dict[str, object]:
-        self.upload_root.mkdir(parents=True, exist_ok=True)
-        package_path = self.upload_root / "incoming.zip"
-        package_path.write_bytes(package.file.read())
-        try:
-            self.forwarded_actors.append(
-                (str(current_user.id), current_user.username)
-            )
-            return self.publisher.ingest_draft(
-                package_path,
-                original_filename=package.filename or "knowledge.zip",
-                actor_user_id=str(current_user.id),
-                actor_username=current_user.username,
-            )
-        finally:
-            package_path.unlink(missing_ok=True)
+    async def __aenter__(self) -> _WorkerInternalHttpClient:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
+    async def post(self, url: str, **kwargs: object):
+        return self.worker_client.post(urlsplit(url).path, **kwargs)
 
 
 class _NoNetworkPublicationLock:
@@ -196,32 +181,41 @@ def governed_web_knowledge(monkeypatch: pytest.MonkeyPatch):
             chroma_client=object(),
             redis_client=object(),
         )
-        service = _InProcessPublisherGateway(
-            repository=repository,
-            publisher=publisher,
-            upload_root=scratch / "incoming",
+        worker_app = create_publisher_worker_app(
+            service=publisher,
+            internal_bearer_secret="acceptance-worker-secret",
+            job_consumer_poll_interval_seconds=3600,
         )
-        app = create_app(
-            graph_factory=lambda: object(),
-            history_service_factory=lambda: SimpleNamespace(),
-            monitoring_service_factory=lambda: SimpleNamespace(),
-            auth_service_factory=lambda: auth,
-            knowledge_admin_service_factory=lambda: service,
-            chat_runner=lambda *_args, **_kwargs: "answer",
-            knowledge_preflight=lambda: None,
-        )
-        with TestClient(app, base_url="http://testserver") as client:
-            yield SimpleNamespace(
-                client=client,
-                factory=factory,
-                repository=repository,
-                publisher=publisher,
-                service=service,
-                indexer=indexer,
-                query=query,
-                admin=admin,
-                user=user,
+        with TestClient(worker_app, base_url="http://knowledge-publisher:8000") as worker_client:
+            monkeypatch.setattr(
+                "metro_agent.knowledge_admin.service.httpx.AsyncClient",
+                lambda **kwargs: _WorkerInternalHttpClient(worker_client, **kwargs),
             )
+            service = KnowledgeAdminService(
+                repository=repository,
+                worker_base_url="http://knowledge-publisher:8000",
+                internal_bearer_secret="acceptance-worker-secret",
+            )
+            app = create_app(
+                graph_factory=lambda: object(),
+                history_service_factory=lambda: SimpleNamespace(),
+                monitoring_service_factory=lambda: SimpleNamespace(),
+                auth_service_factory=lambda: auth,
+                knowledge_admin_service_factory=lambda: service,
+                chat_runner=lambda *_args, **_kwargs: "answer",
+                knowledge_preflight=lambda: None,
+            )
+            with TestClient(app, base_url="http://testserver") as client:
+                yield SimpleNamespace(
+                    client=client,
+                    factory=factory,
+                    repository=repository,
+                    publisher=publisher,
+                    indexer=indexer,
+                    query=query,
+                    admin=admin,
+                    user=user,
+                )
     finally:
         engine.dispose()
         shutil.rmtree(scratch, ignore_errors=True)
@@ -364,9 +358,11 @@ def test_admin_uploader_self_publishes_only_through_controlled_job(
 
     assert completed_publish == {"status": "published", "build_id": NEW_BUILD_ID}
     assert len(governed_web_knowledge.indexer.calls) == 1
-    assert governed_web_knowledge.service.forwarded_actors == [
-        (str(governed_web_knowledge.admin.id), "knowledge.admin")
-    ]
+    draft = governed_web_knowledge.repository.get_draft(draft_id)
+    assert (draft.actor_user_id, draft.actor_username) == (
+        str(governed_web_knowledge.admin.id),
+        "knowledge.admin",
+    )
     assert releases.status_code == 200
     by_build_id = {release["build_id"]: release for release in releases.json()}
     assert by_build_id[NEW_BUILD_ID]["status"] == "current"
