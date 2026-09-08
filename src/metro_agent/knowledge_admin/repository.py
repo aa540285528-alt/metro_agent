@@ -254,6 +254,13 @@ class KnowledgeAdminRepository:
                 for draft in drafts
             ]
 
+    def get_draft(self, draft_id: str) -> KnowledgeDraft:
+        with self._session_factory() as session:
+            draft = session.get(KnowledgeDraft, draft_id)
+            if draft is None:
+                raise ValueError(f"Unknown knowledge draft {draft_id}")
+            return draft
+
     def list_releases(self) -> list[ReleaseListItem]:
         with self._session_factory() as session:
             releases = session.scalars(
