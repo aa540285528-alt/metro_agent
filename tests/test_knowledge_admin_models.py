@@ -158,6 +158,11 @@ def test_public_dtos_reject_unknown_fields_and_hide_private_names() -> None:
         document_count=3,
         status="current",
         published_at="2026-09-07T00:00:00Z",
+        artifact_sha256="a" * 64,
+        package_sha256="b" * 64,
+        source_manifest_sha256="c" * 64,
+        draft_id="draft-1",
+        validation_summary={"valid": True},
     )
 
     assert "storage_key" not in detail.model_dump()
