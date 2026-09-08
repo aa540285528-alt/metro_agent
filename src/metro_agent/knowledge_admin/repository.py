@@ -422,6 +422,7 @@ class KnowledgeAdminRepository:
                     status=release.status,
                     published_at=release.published_at,
                     artifact_sha256=release.artifact_sha256,
+                    package_sha256=release.draft.package_sha256,
                     source_manifest_sha256=release.source_manifest_sha256,
                     draft_id=release.draft_id,
                     validation_summary=release.validation_summary,

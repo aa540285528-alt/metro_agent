@@ -44,6 +44,7 @@ class ReleaseListItem(_PublicSchema):
     status: str
     published_at: datetime
     artifact_sha256: str
+    package_sha256: str
     source_manifest_sha256: str
     draft_id: str
     validation_summary: dict[str, Any]

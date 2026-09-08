@@ -83,6 +83,7 @@ class FakeKnowledgeAdminService:
                 published_at=NOW,
                 collection_name="private-collection-hidden",
                 artifact_sha256="b" * 64,
+                package_sha256="a" * 64,
                 source_manifest_sha256="c" * 64,
                 draft_id=DRAFT_ID,
                 validation_summary={"valid": True},
@@ -414,6 +415,7 @@ def test_knowledge_admin_routes_use_current_user_and_hide_private_fields(admin_a
     assert releases.status_code == 200
     assert "collection_name" not in releases.text
     assert releases.json()[0]["artifact_sha256"] == "b" * 64
+    assert releases.json()[0]["package_sha256"] == "a" * 64
     assert releases.json()[0]["source_manifest_sha256"] == "c" * 64
     assert releases.json()[0]["validation_summary"] == {"valid": True}
     assert audits.status_code == 200

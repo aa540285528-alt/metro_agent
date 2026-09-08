@@ -55,6 +55,7 @@ def test_knowledge_admin_navigation_is_present_but_admin_gated() -> None:
     assert "/api/admin/knowledge/releases" in script
     assert "/api/admin/knowledge/jobs/" in script
     assert "/api/admin/knowledge/audits" in script
+    assert "package_sha256" in script
 
 
 def test_knowledge_admin_workspace_clears_transient_state_on_logout() -> None:

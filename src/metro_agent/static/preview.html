@@ -895,7 +895,7 @@
                 title.textContent = release.build_id || '未命名构建';
                 const meta = document.createElement('p');
                 meta.className = 'mt-1 text-xs text-on-surface-variant whitespace-pre-wrap';
-                meta.textContent = `${release.published_at || '未知时间'} · 来源哈希：${release.source_manifest_sha256 || '—'} · ${release.document_count === null || release.document_count === undefined ? '—' : `${release.document_count} 份文档`}`;
+                meta.textContent = `${release.published_at || '未知时间'} · ZIP 哈希：${release.package_sha256 || '—'} · ${release.document_count === null || release.document_count === undefined ? '—' : `${release.document_count} 份文档`}`;
                 titleBlock.append(title, meta);
                 const badge = document.createElement('span');
                 badge.className = 'rounded-full border border-outline-variant px-2 py-0.5 text-[11px] text-on-surface-variant';

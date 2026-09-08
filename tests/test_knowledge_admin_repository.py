@@ -228,6 +228,7 @@ def test_public_list_dtos_do_not_disclose_storage_or_collection_names(
     assert "storage_key" not in draft_data
     assert "collection_name" not in release_data
     assert release_data["artifact_sha256"] == "b" * 64
+    assert release_data["package_sha256"] == "a" * 64
     assert release_data["source_manifest_sha256"] == "c" * 64
     assert release_data["validation_summary"] == {"valid": True}
 
