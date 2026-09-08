@@ -73,6 +73,10 @@
 <span class="material-symbols-outlined text-[18px]">monitoring</span>
                 监控页面
             </button>
+<button class="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-full text-on-surface-variant hover:text-primary hover:bg-surface-container-low transition-colors font-body-md text-sm font-medium" data-knowledge-admin-trigger type="button">
+<span class="material-symbols-outlined text-[18px]">library_books</span>
+                知识管理
+            </button>
 </div>
 <!-- Collapsed Rail -->
 <div class="sidebar-collapsed-content flex-col items-center gap-2 pt-4 w-full">
@@ -87,6 +91,9 @@
 </button>
 <button class="w-10 h-10 flex items-center justify-center rounded-xl text-outline hover:text-primary hover:bg-surface-container-low transition-colors" data-monitoring-trigger title="监控页面" type="button">
 <span class="material-symbols-outlined text-[20px]">monitoring</span>
+</button>
+<button class="w-10 h-10 flex items-center justify-center rounded-xl text-outline hover:text-primary hover:bg-surface-container-low transition-colors" data-knowledge-admin-trigger title="知识管理" type="button">
+<span class="material-symbols-outlined text-[20px]">library_books</span>
 </button>
 <button class="w-10 h-10 flex items-center justify-center rounded-xl text-outline hover:text-primary hover:bg-surface-container-low transition-colors" title="搜索 (Cmd+K)">
 <span class="material-symbols-outlined text-[20px]">search</span>
@@ -294,6 +301,107 @@
 <div class="hidden min-h-[260px] border border-outline-variant bg-surface-container-lowest rounded-lg overflow-hidden" id="monitoring-evaluation-panel"></div>
 </div>
 </section>
+<!-- Knowledge Admin Workspace -->
+<section class="hidden flex-1 min-h-0 overflow-y-auto w-full px-4 py-6 md:px-8" id="knowledge-admin-workspace" aria-live="polite">
+<div class="max-w-[1200px] mx-auto space-y-6">
+<header class="flex items-start justify-between gap-4">
+<div>
+<p class="font-label-caps text-[11px] text-primary">知识管理</p>
+<h2 class="mt-1 text-2xl font-bold text-on-background">知识发布工作区</h2>
+</div>
+<button class="w-10 h-10 shrink-0 flex items-center justify-center rounded-md text-outline hover:text-primary hover:bg-surface-container-low transition-colors" data-knowledge-admin-refresh title="刷新知识管理数据" type="button">
+<span class="material-symbols-outlined text-[20px]">refresh</span>
+</button>
+</header>
+<div class="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+<section class="rounded-xl border border-outline-variant bg-surface-container-lowest p-5 tonal-shadow space-y-3" id="knowledge-current-release">
+<div class="flex items-center justify-between gap-4">
+<div>
+<p class="font-label-caps text-[11px] text-primary">当前发布</p>
+<h3 class="mt-1 text-lg font-semibold text-on-background">最新已发布知识库</h3>
+</div>
+<span class="rounded-full border border-outline-variant px-3 py-1 text-xs text-on-surface-variant" id="knowledge-current-release-status">未加载</span>
+</div>
+<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" id="knowledge-current-release-metadata"></div>
+<div class="rounded-lg border border-outline-variant bg-surface-container-low p-4">
+<p class="text-xs text-on-surface-variant">发布说明</p>
+<p class="mt-2 whitespace-pre-wrap text-sm text-on-surface" id="knowledge-current-release-summary">暂无发布数据。</p>
+</div>
+</section>
+<section class="rounded-xl border border-outline-variant bg-surface-container-lowest p-5 tonal-shadow space-y-4">
+<div class="flex items-center justify-between gap-4">
+<div>
+<p class="font-label-caps text-[11px] text-primary">上传草稿</p>
+<h3 class="mt-1 text-lg font-semibold text-on-background">ZIP 知识包</h3>
+</div>
+<span class="text-xs text-on-surface-variant" id="knowledge-upload-filename">未选择文件</span>
+</div>
+<form class="space-y-4" id="knowledge-upload-form">
+<div>
+<label class="block text-sm font-medium text-on-surface" for="knowledge-upload-input">上传 ZIP</label>
+<input accept=".zip" class="mt-1.5 w-full rounded-md border-outline-variant bg-surface-container-lowest text-sm focus:border-primary focus:ring-primary" id="knowledge-upload-input" type="file"/>
+</div>
+<p class="text-xs text-on-surface-variant">仅接受 `.zip` 作为前端提示，服务器仍会校验完整内容。</p>
+<p class="hidden text-sm text-error" id="knowledge-upload-error" role="alert"></p>
+<div class="flex items-center justify-between gap-3">
+<span class="text-sm text-on-surface-variant" id="knowledge-upload-status">等待上传</span>
+<button class="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-wait disabled:opacity-60" id="knowledge-upload-submit" type="submit">上传并校验</button>
+</div>
+</form>
+</section>
+</div>
+<div class="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)]">
+<section class="rounded-xl border border-outline-variant bg-surface-container-lowest overflow-hidden tonal-shadow">
+<div class="border-b border-outline-variant px-5 py-4">
+<p class="font-label-caps text-[11px] text-primary">草稿</p>
+<h3 class="mt-1 text-lg font-semibold text-on-background">草稿与校验报告</h3>
+</div>
+<div class="grid gap-0 lg:grid-cols-[minmax(260px,0.8fr)_minmax(0,1fr)]">
+<div class="min-h-[260px] border-b border-outline-variant lg:border-b-0 lg:border-r bg-surface-container-lowest" id="knowledge-draft-list"></div>
+<div class="min-h-[260px] p-5 space-y-4" id="knowledge-draft-detail"></div>
+</div>
+</section>
+<div class="grid gap-5">
+<section class="rounded-xl border border-outline-variant bg-surface-container-lowest p-5 tonal-shadow space-y-3" id="knowledge-validation-report">
+<div class="flex items-center justify-between gap-4">
+<div>
+<p class="font-label-caps text-[11px] text-primary">校验报告</p>
+<h3 class="mt-1 text-lg font-semibold text-on-background">详细结果</h3>
+</div>
+<span class="text-xs text-on-surface-variant" id="knowledge-job-status">无运行中的任务</span>
+</div>
+<div class="rounded-lg border border-outline-variant bg-surface-container-low p-4">
+<p class="text-xs text-on-surface-variant">报告内容</p>
+<pre class="mt-2 whitespace-pre-wrap break-words text-sm text-on-surface" id="knowledge-validation-report-body">请选择一个草稿查看校验报告。</pre>
+</div>
+<div class="grid gap-3 sm:grid-cols-2">
+<button class="inline-flex h-10 items-center justify-center rounded-md border border-outline-variant px-4 text-sm text-on-surface disabled:cursor-not-allowed disabled:opacity-50" id="knowledge-validate-button" type="button">重新校验</button>
+<button class="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50" id="knowledge-publish-button" type="button">发布</button>
+</div>
+</section>
+<section class="rounded-xl border border-outline-variant bg-surface-container-lowest p-5 tonal-shadow space-y-3" id="knowledge-release-history">
+<div class="flex items-center justify-between gap-4">
+<div>
+<p class="font-label-caps text-[11px] text-primary">发布历史</p>
+<h3 class="mt-1 text-lg font-semibold text-on-background">版本与回滚</h3>
+</div>
+<span class="text-xs text-on-surface-variant">滚动查看</span>
+</div>
+<div class="space-y-2" id="knowledge-release-history-list"></div>
+</section>
+<section class="rounded-xl border border-outline-variant bg-surface-container-lowest p-5 tonal-shadow space-y-3" id="knowledge-audit-history">
+<div class="flex items-center justify-between gap-4">
+<div>
+<p class="font-label-caps text-[11px] text-primary">操作审计</p>
+<h3 class="mt-1 text-lg font-semibold text-on-background">发布与回滚记录</h3>
+</div>
+<span class="text-xs text-on-surface-variant">只读</span>
+</div>
+<div class="space-y-2" id="knowledge-audit-history-list"></div>
+</section>
+</div>
+</div>
+</section>
 <!-- Global Footer -->
 <footer class="mt-auto py-4 text-center z-10 relative">
 <p class="font-body-md text-sm text-outline">
@@ -306,6 +414,19 @@
 <aside class="hidden md:flex fixed right-5 top-1/2 -translate-y-1/2 z-50 rounded-2xl border border-outline-variant/60 thread-index-rail px-1.5 py-3" id="message-thread-rail" aria-label="消息线程导航">
 <div class="thread-index-list flex flex-col gap-1 w-full" id="message-thread-list"></div>
 </aside>
+<div class="fixed inset-0 z-[1210] hidden items-center justify-center bg-on-surface/20 p-4" id="knowledge-rollback-dialog">
+<form class="w-full max-w-lg rounded-lg bg-surface-container-lowest p-5 shadow-lg" id="knowledge-rollback-form" role="dialog" aria-modal="true" aria-labelledby="knowledge-rollback-title">
+<h2 class="text-base font-semibold text-on-surface" id="knowledge-rollback-title">回滚知识发布</h2>
+<p class="mt-2 text-sm text-on-surface-variant" id="knowledge-rollback-target">请选择要回滚的发布版本。</p>
+<label class="block text-sm font-medium text-on-surface" for="knowledge-rollback-reason">回滚原因</label>
+<textarea class="mt-3 w-full rounded-md border-outline-variant text-sm" id="knowledge-rollback-reason" maxlength="500" required rows="4"></textarea>
+<p class="mt-2 text-xs text-on-surface-variant">需要填写原因，便于审计与恢复排查。</p>
+<div class="mt-4 flex justify-end gap-2">
+<button class="px-3 py-2 text-sm text-on-surface-variant" data-knowledge-rollback-cancel type="button">取消</button>
+<button class="rounded-md bg-primary px-3 py-2 text-sm text-on-primary" id="knowledge-rollback-submit" type="submit">确认回滚</button>
+</div>
+</form>
+</div>
 <!-- Search Modal Overlay -->
 <div class="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] bg-surface-container-lowest/40 backdrop-blur-md transition-opacity hidden" id="search-modal">
 <div class="w-full max-w-2xl bg-surface-container-lowest rounded-2xl shadow-2xl border border-outline-variant overflow-hidden flex flex-col mx-4 animate-fade-in-up">
@@ -350,6 +471,30 @@
         const monitoringTraceLayout = document.getElementById('monitoring-trace-layout');
         const monitoringOnlinePanel = document.getElementById('monitoring-online-panel');
         const monitoringEvaluationPanel = document.getElementById('monitoring-evaluation-panel');
+        const knowledgeAdminWorkspace = document.getElementById('knowledge-admin-workspace');
+        const knowledgeAdminRefreshButton = document.querySelector('[data-knowledge-admin-refresh]');
+        const knowledgeAdminUploadForm = document.getElementById('knowledge-upload-form');
+        const knowledgeAdminUploadInput = document.getElementById('knowledge-upload-input');
+        const knowledgeAdminUploadStatus = document.getElementById('knowledge-upload-status');
+        const knowledgeAdminUploadError = document.getElementById('knowledge-upload-error');
+        const knowledgeAdminUploadFilename = document.getElementById('knowledge-upload-filename');
+        const knowledgeAdminCurrentReleaseStatus = document.getElementById('knowledge-current-release-status');
+        const knowledgeAdminCurrentReleaseMetadata = document.getElementById('knowledge-current-release-metadata');
+        const knowledgeAdminCurrentReleaseSummary = document.getElementById('knowledge-current-release-summary');
+        const knowledgeAdminDraftList = document.getElementById('knowledge-draft-list');
+        const knowledgeAdminDraftDetail = document.getElementById('knowledge-draft-detail');
+        const knowledgeAdminValidationReportBody = document.getElementById('knowledge-validation-report-body');
+        const knowledgeAdminJobStatus = document.getElementById('knowledge-job-status');
+        const knowledgeAdminValidateButton = document.getElementById('knowledge-validate-button');
+        const knowledgeAdminPublishButton = document.getElementById('knowledge-publish-button');
+        const knowledgeAdminReleaseHistoryList = document.getElementById('knowledge-release-history-list');
+        const knowledgeAdminAuditHistoryList = document.getElementById('knowledge-audit-history-list');
+        const knowledgeAdminRollbackDialog = document.getElementById('knowledge-rollback-dialog');
+        const knowledgeAdminRollbackForm = document.getElementById('knowledge-rollback-form');
+        const knowledgeAdminRollbackReason = document.getElementById('knowledge-rollback-reason');
+        const knowledgeAdminRollbackTarget = document.getElementById('knowledge-rollback-target');
+        const knowledgeAdminRollbackSubmit = document.getElementById('knowledge-rollback-submit');
+        const knowledgeAdminRollbackCancel = document.querySelector('[data-knowledge-rollback-cancel]');
         const authGate = document.getElementById('auth-gate');
         const authLoading = document.getElementById('auth-loading');
         const loginView = document.getElementById('login-view');
@@ -407,6 +552,20 @@
         let activeMonitoringRequestController = null;
         let monitoringData = { summary: null, traces: [], evaluations: [] };
         let activeMonitoringTab = 'traces';
+        let knowledgeAdminRequestGeneration = 0;
+        let activeKnowledgeAdminRequestController = null;
+        let knowledgeAdminDetailRequestGeneration = 0;
+        let activeKnowledgeAdminDetailRequestController = null;
+        let knowledgeAdminAuditRequestGeneration = 0;
+        let activeKnowledgeAdminAuditRequestController = null;
+        let knowledgeAdminJobPollTimer = null;
+        let knowledgeAdminDrafts = [];
+        let knowledgeAdminReleases = [];
+        let knowledgeAdminAuditEvents = [];
+        let knowledgeAdminCurrentRelease = null;
+        let knowledgeAdminSelectedDraftId = null;
+        let knowledgeAdminSelectedReleaseBuildId = null;
+        let knowledgeAdminActiveJobId = null;
         let appStatusTimer = null;
 
         class UnauthorizedError extends Error {}
@@ -468,6 +627,435 @@
             currentThreadId = getOrCreateStoredId(STORAGE_KEYS.threadId);
         }
 
+        function knowledgeAdminStatusLabel(status) {
+            switch (status) {
+                case 'uploaded':
+                    return '已上传';
+                case 'validating':
+                    return '校验中';
+                case 'validation_failed':
+                    return '校验失败';
+                case 'ready_to_publish':
+                    return '校验通过，待发布';
+                case 'publishing':
+                    return '发布中';
+                case 'published':
+                    return '已发布';
+                case 'publish_failed':
+                    return '发布失败';
+                default:
+                    return status || '未知状态';
+            }
+        }
+
+        function knowledgeAdminJobLabel(status) {
+            switch (status) {
+                case 'queued':
+                    return '已排队';
+                case 'running':
+                    return '执行中';
+                case 'succeeded':
+                    return '已完成';
+                case 'failed':
+                    return '已失败';
+                default:
+                    return status || '未知任务';
+            }
+        }
+
+        function setKnowledgeAdminStatus(message, className = 'text-on-surface-variant') {
+            if (!knowledgeAdminUploadStatus) return;
+            knowledgeAdminUploadStatus.className = `text-sm ${className}`;
+            knowledgeAdminUploadStatus.textContent = message;
+        }
+
+        function clearKnowledgeAdminPollTimer() {
+            if (knowledgeAdminJobPollTimer !== null) {
+                clearInterval(knowledgeAdminJobPollTimer);
+                knowledgeAdminJobPollTimer = null;
+            }
+        }
+
+        function setKnowledgeAdminActionState() {
+            const selectedDraft = knowledgeAdminDrafts.find((draft) => draft.id === knowledgeAdminSelectedDraftId) || null;
+            const busy = Boolean(knowledgeAdminActiveJobId);
+            if (knowledgeAdminValidateButton) {
+                knowledgeAdminValidateButton.disabled = busy || !selectedDraft;
+            }
+            if (knowledgeAdminPublishButton) {
+                knowledgeAdminPublishButton.disabled = busy || !selectedDraft || selectedDraft.status !== 'ready_to_publish';
+            }
+            if (knowledgeAdminRollbackSubmit) {
+                knowledgeAdminRollbackSubmit.disabled = busy || !knowledgeAdminSelectedReleaseBuildId;
+            }
+            if (knowledgeAdminUploadForm) {
+                Array.from(knowledgeAdminUploadForm.querySelectorAll('button, input')).forEach((element) => {
+                    element.disabled = busy;
+                });
+            }
+        }
+
+        function setKnowledgeAdminAccess() {
+            const allowed = isAdmin();
+            document.querySelectorAll('[data-knowledge-admin-trigger]').forEach((button) => {
+                button.classList.toggle('hidden', !allowed);
+                button.disabled = !allowed;
+            });
+            if (!allowed) {
+                clearKnowledgeAdminState();
+                knowledgeAdminWorkspace?.classList.add('hidden');
+                chatWorkspace?.classList.remove('hidden');
+            }
+        }
+
+        function isCurrentKnowledgeAdminRequest(requestGeneration, controller) {
+            return isAdmin()
+                && requestGeneration === knowledgeAdminRequestGeneration
+                && activeKnowledgeAdminRequestController === controller;
+        }
+
+        function isCurrentKnowledgeAdminDetailRequest(requestGeneration, controller) {
+            return isAdmin()
+                && requestGeneration === knowledgeAdminDetailRequestGeneration
+                && activeKnowledgeAdminDetailRequestController === controller;
+        }
+
+        function isCurrentKnowledgeAdminAuditRequest(requestGeneration, controller) {
+            return isAdmin()
+                && requestGeneration === knowledgeAdminAuditRequestGeneration
+                && activeKnowledgeAdminAuditRequestController === controller;
+        }
+
+        function renderKnowledgeAdminMetric(label, value) {
+            const item = document.createElement('div');
+            item.className = 'rounded-lg border border-outline-variant bg-surface-container-low p-4';
+            const title = document.createElement('p');
+            title.className = 'text-xs text-on-surface-variant';
+            title.textContent = label;
+            const content = document.createElement('p');
+            content.className = 'mt-2 text-sm font-medium text-on-background whitespace-pre-wrap break-words';
+            content.textContent = value;
+            item.append(title, content);
+            return item;
+        }
+
+        function renderKnowledgeAdminCurrentRelease(release) {
+            knowledgeAdminCurrentRelease = release || null;
+            knowledgeAdminCurrentReleaseStatus.textContent = release ? knowledgeAdminStatusLabel(release.status) : '未加载';
+            knowledgeAdminCurrentReleaseMetadata?.replaceChildren();
+            if (!release) {
+                if (knowledgeAdminCurrentReleaseSummary) {
+                    knowledgeAdminCurrentReleaseSummary.textContent = '暂无发布数据。';
+                }
+                return;
+            }
+            knowledgeAdminCurrentReleaseMetadata?.append(
+                renderKnowledgeAdminMetric('构建 ID', release.build_id || '—'),
+                renderKnowledgeAdminMetric('发布状态', knowledgeAdminStatusLabel(release.status)),
+                renderKnowledgeAdminMetric('文档数量', release.document_count === null || release.document_count === undefined ? '—' : String(release.document_count))
+            );
+            if (knowledgeAdminCurrentReleaseSummary) {
+                knowledgeAdminCurrentReleaseSummary.textContent = JSON.stringify(release.validation_summary || {}, null, 2);
+            }
+        }
+
+        function renderKnowledgeAdminValidationReport(report) {
+            if (!knowledgeAdminValidationReportBody) return;
+            if (!report) {
+                knowledgeAdminValidationReportBody.textContent = '请选择一个草稿查看校验报告。';
+                return;
+            }
+            knowledgeAdminValidationReportBody.textContent = typeof report === 'string'
+                ? report
+                : JSON.stringify(report, null, 2);
+        }
+
+        function renderKnowledgeAdminDraftDetail(draft) {
+            if (!knowledgeAdminDraftDetail) return;
+            knowledgeAdminDraftDetail.replaceChildren();
+            if (!draft) {
+                const empty = document.createElement('p');
+                empty.className = 'text-sm text-on-surface-variant';
+                empty.textContent = '请选择左侧草稿查看上传信息与校验结果。';
+                knowledgeAdminDraftDetail.appendChild(empty);
+                renderKnowledgeAdminValidationReport(null);
+                setKnowledgeAdminActionState();
+                return;
+            }
+
+            const header = document.createElement('div');
+            header.className = 'flex items-start justify-between gap-4';
+            const titleBlock = document.createElement('div');
+            const title = document.createElement('h4');
+            title.className = 'text-base font-semibold text-on-background break-words';
+            title.textContent = draft.original_filename || draft.id;
+            const subtitle = document.createElement('p');
+            subtitle.className = 'mt-1 text-xs text-on-surface-variant break-words';
+            subtitle.textContent = `${draft.actor_username || '未知用户'} · ${draft.created_at || '未知时间'}`;
+            titleBlock.append(title, subtitle);
+            const status = document.createElement('span');
+            status.className = 'rounded-full border border-outline-variant px-3 py-1 text-xs text-on-surface-variant';
+            status.textContent = knowledgeAdminStatusLabel(draft.status);
+            header.append(titleBlock, status);
+
+            const fields = document.createElement('div');
+            fields.className = 'grid gap-3 sm:grid-cols-2';
+            fields.append(
+                renderKnowledgeAdminMetric('草稿 ID', draft.id || '—'),
+                renderKnowledgeAdminMetric('文件大小', draft.package_size_bytes === null || draft.package_size_bytes === undefined ? '—' : `${draft.package_size_bytes} B`),
+                renderKnowledgeAdminMetric('存储键', draft.storage_key || '—'),
+                renderKnowledgeAdminMetric('更新时间', draft.updated_at || '—')
+            );
+
+            knowledgeAdminDraftDetail.append(header, fields);
+            renderKnowledgeAdminValidationReport(draft.validation_report || null);
+            setKnowledgeAdminActionState();
+        }
+
+        function renderKnowledgeAdminDrafts(drafts) {
+            if (!knowledgeAdminDraftList) return;
+            knowledgeAdminDraftList.replaceChildren();
+            if (!drafts.length) {
+                setKnowledgeAdminStatus('暂无草稿，先上传一个 ZIP 知识包。');
+                const empty = document.createElement('p');
+                empty.className = 'p-4 text-sm text-on-surface-variant';
+                empty.textContent = '还没有可用的草稿。';
+                knowledgeAdminDraftList.appendChild(empty);
+                renderKnowledgeAdminDraftDetail(null);
+                return;
+            }
+
+            drafts.forEach((draft) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.dataset.draftId = draft.id;
+                button.className = 'w-full text-left p-4 border-b border-outline-variant last:border-b-0 hover:bg-surface-container-low transition-colors';
+                if (draft.id === knowledgeAdminSelectedDraftId) {
+                    button.classList.add('bg-surface-container-low');
+                }
+                const top = document.createElement('div');
+                top.className = 'flex items-center justify-between gap-3';
+                const title = document.createElement('p');
+                title.className = 'truncate text-sm font-medium text-on-background';
+                title.textContent = draft.original_filename || draft.id;
+                const status = document.createElement('span');
+                status.className = 'shrink-0 rounded-full border border-outline-variant px-2 py-0.5 text-[11px] text-on-surface-variant';
+                status.textContent = knowledgeAdminStatusLabel(draft.status);
+                const meta = document.createElement('p');
+                meta.className = 'mt-2 text-xs text-on-surface-variant truncate';
+                meta.textContent = `${draft.actor_username || '未知用户'} · ${draft.updated_at || draft.created_at || '未知时间'}`;
+                top.append(title, status);
+                button.append(top, meta);
+                button.addEventListener('click', () => {
+                    knowledgeAdminSelectedDraftId = draft.id;
+                    renderKnowledgeAdminDrafts(knowledgeAdminDrafts);
+                    void loadKnowledgeAdminDraftDetail(draft.id);
+                });
+                knowledgeAdminDraftList.appendChild(button);
+            });
+        }
+
+        function renderKnowledgeAdminReleases(releases) {
+            if (!knowledgeAdminReleaseHistoryList) return;
+            knowledgeAdminReleaseHistoryList.replaceChildren();
+            if (!releases.length) {
+                const empty = document.createElement('p');
+                empty.className = 'text-sm text-on-surface-variant';
+                empty.textContent = '暂无发布历史。';
+                knowledgeAdminReleaseHistoryList.appendChild(empty);
+                return;
+            }
+
+            releases.forEach((release) => {
+                const row = document.createElement('button');
+                row.type = 'button';
+                row.dataset.releaseBuildId = release.build_id;
+                row.className = 'w-full rounded-lg border border-outline-variant p-4 text-left hover:bg-surface-container-low transition-colors';
+                if (release.build_id === knowledgeAdminSelectedReleaseBuildId) {
+                    row.classList.add('bg-surface-container-low');
+                }
+                const top = document.createElement('div');
+                top.className = 'flex items-start justify-between gap-3';
+                const titleBlock = document.createElement('div');
+                const title = document.createElement('p');
+                title.className = 'text-sm font-medium text-on-background';
+                title.textContent = release.build_id || '未命名构建';
+                const meta = document.createElement('p');
+                meta.className = 'mt-1 text-xs text-on-surface-variant whitespace-pre-wrap';
+                meta.textContent = `${release.published_at || '未知时间'} · ${release.collection_name || '未知集合'} · ${release.document_count === null || release.document_count === undefined ? '—' : `${release.document_count} 份文档`}`;
+                titleBlock.append(title, meta);
+                const badge = document.createElement('span');
+                badge.className = 'rounded-full border border-outline-variant px-2 py-0.5 text-[11px] text-on-surface-variant';
+                badge.textContent = knowledgeAdminStatusLabel(release.status);
+                top.append(titleBlock, badge);
+                const summary = document.createElement('p');
+                summary.className = 'mt-3 text-xs text-on-surface-variant whitespace-pre-wrap break-words';
+                summary.textContent = JSON.stringify(release.validation_summary || {}, null, 2);
+                const actions = document.createElement('div');
+                actions.className = 'mt-3 flex flex-wrap gap-2';
+                const rollback = document.createElement('button');
+                rollback.type = 'button';
+                rollback.className = 'inline-flex h-9 items-center justify-center rounded-md border border-outline-variant px-3 text-xs text-on-surface disabled:cursor-not-allowed disabled:opacity-50';
+                rollback.textContent = '回滚';
+                rollback.disabled = knowledgeAdminActiveJobId !== null;
+                rollback.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    knowledgeAdminSelectedReleaseBuildId = release.build_id;
+                    openKnowledgeAdminRollbackDialog(release, rollback);
+                });
+                actions.append(rollback);
+                row.append(top, summary, actions);
+                row.addEventListener('click', () => {
+                    knowledgeAdminSelectedReleaseBuildId = release.build_id;
+                    renderKnowledgeAdminReleases(knowledgeAdminReleases);
+                    openKnowledgeAdminRollbackDialog(release, row);
+                });
+                knowledgeAdminReleaseHistoryList.appendChild(row);
+            });
+        }
+
+        function renderKnowledgeAdminAuditEvents(events) {
+            if (!knowledgeAdminAuditHistoryList) return;
+            knowledgeAdminAuditHistoryList.replaceChildren();
+            if (!events.length) {
+                const empty = document.createElement('p');
+                empty.className = 'text-sm text-on-surface-variant';
+                empty.textContent = '暂无审计记录。';
+                knowledgeAdminAuditHistoryList.appendChild(empty);
+                return;
+            }
+
+            events.forEach((event) => {
+                const row = document.createElement('div');
+                row.className = 'rounded-lg border border-outline-variant p-4';
+                const title = document.createElement('p');
+                title.className = 'text-sm font-medium text-on-background';
+                title.textContent = `${event.action || event.event_type || '未知动作'} · ${event.result || event.status || '未知结果'}`;
+                const meta = document.createElement('p');
+                meta.className = 'mt-1 text-xs text-on-surface-variant whitespace-pre-wrap break-words';
+                meta.textContent = `${event.occurred_at || event.created_at || '未知时间'} · ${event.actor_username || event.actor || '未知用户'}${event.summary ? `\n${event.summary}` : ''}${event.reason_summary ? `\n原因：${event.reason_summary}` : ''}`;
+                row.append(title, meta);
+                knowledgeAdminAuditHistoryList.appendChild(row);
+            });
+        }
+
+        function clearKnowledgeAdminState() {
+            knowledgeAdminRequestGeneration += 1;
+            activeKnowledgeAdminRequestController?.abort();
+            activeKnowledgeAdminRequestController = null;
+            knowledgeAdminDetailRequestGeneration += 1;
+            activeKnowledgeAdminDetailRequestController?.abort();
+            activeKnowledgeAdminDetailRequestController = null;
+            knowledgeAdminAuditRequestGeneration += 1;
+            activeKnowledgeAdminAuditRequestController?.abort();
+            activeKnowledgeAdminAuditRequestController = null;
+            clearKnowledgeAdminPollTimer();
+            knowledgeAdminDrafts = [];
+            knowledgeAdminReleases = [];
+            knowledgeAdminAuditEvents = [];
+            knowledgeAdminCurrentRelease = null;
+            knowledgeAdminSelectedDraftId = null;
+            knowledgeAdminSelectedReleaseBuildId = null;
+            knowledgeAdminActiveJobId = null;
+            knowledgeAdminWorkspace?.classList.add('hidden');
+            knowledgeAdminWorkspace?.classList.remove('flex');
+            if (knowledgeAdminCurrentReleaseStatus) knowledgeAdminCurrentReleaseStatus.textContent = '未加载';
+            knowledgeAdminCurrentReleaseMetadata?.replaceChildren();
+            if (knowledgeAdminCurrentReleaseSummary) knowledgeAdminCurrentReleaseSummary.textContent = '暂无发布数据。';
+            knowledgeAdminDraftList?.replaceChildren();
+            knowledgeAdminDraftDetail?.replaceChildren();
+            if (knowledgeAdminValidationReportBody) knowledgeAdminValidationReportBody.textContent = '请选择一个草稿查看校验报告。';
+            if (knowledgeAdminJobStatus) knowledgeAdminJobStatus.textContent = '无运行中的任务';
+            knowledgeAdminReleaseHistoryList?.replaceChildren();
+            knowledgeAdminAuditHistoryList?.replaceChildren();
+            if (knowledgeAdminUploadForm) knowledgeAdminUploadForm.reset();
+            if (knowledgeAdminUploadInput) knowledgeAdminUploadInput.value = '';
+            if (knowledgeAdminUploadFilename) knowledgeAdminUploadFilename.textContent = '未选择文件';
+            setKnowledgeAdminStatus('等待上传');
+            if (knowledgeAdminUploadError) {
+                knowledgeAdminUploadError.textContent = '';
+                knowledgeAdminUploadError.classList.add('hidden');
+            }
+            if (knowledgeAdminRollbackForm) knowledgeAdminRollbackForm.reset();
+            if (knowledgeAdminRollbackReason) knowledgeAdminRollbackReason.value = '';
+            if (knowledgeAdminRollbackTarget) knowledgeAdminRollbackTarget.textContent = '请选择要回滚的发布版本。';
+            knowledgeAdminRollbackDialog?.classList.add('hidden');
+            knowledgeAdminRollbackDialog?.classList.remove('flex');
+            if (knowledgeAdminPublishButton) knowledgeAdminPublishButton.disabled = false;
+            if (knowledgeAdminValidateButton) knowledgeAdminValidateButton.disabled = false;
+            if (knowledgeAdminRollbackSubmit) knowledgeAdminRollbackSubmit.disabled = false;
+            knowledgeAdminActiveJobId = null;
+        }
+
+        function openKnowledgeAdminRollbackDialog(release, opener) {
+            if (!knowledgeAdminRollbackDialog || !knowledgeAdminRollbackReason || !knowledgeAdminRollbackTarget) return;
+            knowledgeAdminSelectedReleaseBuildId = release.build_id;
+            dialogReturnFocus = opener;
+            knowledgeAdminRollbackTarget.textContent = `回滚目标：${release.build_id || '未知构建'}`;
+            knowledgeAdminRollbackDialog.classList.remove('hidden');
+            knowledgeAdminRollbackDialog.classList.add('flex');
+            knowledgeAdminRollbackReason.value = '';
+            knowledgeAdminRollbackReason.focus();
+        }
+
+        function closeKnowledgeAdminRollbackDialog() {
+            knowledgeAdminRollbackDialog?.classList.add('hidden');
+            knowledgeAdminRollbackDialog?.classList.remove('flex');
+            if (dialogReturnFocus) {
+                dialogReturnFocus.focus();
+                dialogReturnFocus = null;
+            }
+        }
+
+        function refreshKnowledgeAdminData() {
+            return loadKnowledgeAdminData();
+        }
+
+        async function loadKnowledgeAdminAuditEvents() {
+            if (!isAdmin()) return;
+            const requestGeneration = ++knowledgeAdminAuditRequestGeneration;
+            activeKnowledgeAdminAuditRequestController?.abort();
+            const controller = new AbortController();
+            activeKnowledgeAdminAuditRequestController = controller;
+            if (knowledgeAdminAuditHistoryList) {
+                knowledgeAdminAuditHistoryList.replaceChildren();
+                const loading = document.createElement('p');
+                loading.className = 'text-sm text-on-surface-variant';
+                loading.textContent = '正在加载审计记录…';
+                knowledgeAdminAuditHistoryList.appendChild(loading);
+            }
+            try {
+                const response = await apiFetch('/api/admin/knowledge/audits', { signal: controller.signal });
+                if (!isCurrentKnowledgeAdminAuditRequest(requestGeneration, controller)) return;
+                if (!response || !response.ok) {
+                    knowledgeAdminAuditEvents = [];
+                    renderKnowledgeAdminAuditEvents(knowledgeAdminAuditEvents);
+                    return;
+                }
+                const payload = await response.json();
+                if (!isCurrentKnowledgeAdminAuditRequest(requestGeneration, controller)) return;
+                const events = Array.isArray(payload)
+                    ? payload
+                    : Array.isArray(payload?.items)
+                        ? payload.items
+                        : Array.isArray(payload?.events)
+                            ? payload.events
+                            : [];
+                knowledgeAdminAuditEvents = events;
+                renderKnowledgeAdminAuditEvents(knowledgeAdminAuditEvents);
+            } catch (error) {
+                if (error instanceof UnauthorizedError || error.name === 'AbortError') return;
+                if (isCurrentKnowledgeAdminAuditRequest(requestGeneration, controller)) {
+                    knowledgeAdminAuditEvents = [];
+                    renderKnowledgeAdminAuditEvents(knowledgeAdminAuditEvents);
+                }
+            } finally {
+                if (activeKnowledgeAdminAuditRequestController === controller) {
+                    activeKnowledgeAdminAuditRequestController = null;
+                }
+            }
+        }
+
         function setMonitoringAccess() {
             const allowed = isAdmin();
             document.querySelectorAll('[data-monitoring-trigger]').forEach((button) => {
@@ -499,6 +1087,291 @@
             monitoringEvaluationPanel?.replaceChildren();
         }
 
+        async function loadKnowledgeAdminDraftDetail(draftId) {
+            if (!draftId) {
+                renderKnowledgeAdminDraftDetail(null);
+                return;
+            }
+            const requestGeneration = ++knowledgeAdminDetailRequestGeneration;
+            activeKnowledgeAdminDetailRequestController?.abort();
+            const controller = new AbortController();
+            activeKnowledgeAdminDetailRequestController = controller;
+            try {
+                const response = await apiFetch(`/api/admin/knowledge/drafts/${encodeURIComponent(draftId)}`, {
+                    signal: controller.signal
+                });
+                if (!isCurrentKnowledgeAdminDetailRequest(requestGeneration, controller)) return;
+                if (!response.ok) {
+                    throw new Error(`Knowledge draft request failed with status ${response.status}.`);
+                }
+                const draft = await response.json();
+                if (!isCurrentKnowledgeAdminDetailRequest(requestGeneration, controller)) return;
+                knowledgeAdminSelectedDraftId = draft.id;
+                renderKnowledgeAdminDrafts(knowledgeAdminDrafts);
+                renderKnowledgeAdminDraftDetail(draft);
+            } catch (error) {
+                if (error instanceof UnauthorizedError || error.name === 'AbortError') return;
+                if (isCurrentKnowledgeAdminDetailRequest(requestGeneration, controller)) {
+                    setKnowledgeAdminStatus('无法加载草稿详情，请稍后重试。', 'text-error');
+                }
+            } finally {
+                if (activeKnowledgeAdminDetailRequestController === controller) {
+                    activeKnowledgeAdminDetailRequestController = null;
+                }
+            }
+        }
+
+        async function loadKnowledgeAdminData() {
+            if (!isAdmin()) return;
+            const requestGeneration = ++knowledgeAdminRequestGeneration;
+            activeKnowledgeAdminRequestController?.abort();
+            const controller = new AbortController();
+            activeKnowledgeAdminRequestController = controller;
+            setKnowledgeAdminStatus('正在加载知识管理数据…');
+            try {
+                const [draftsResponse, releasesResponse] = await Promise.all([
+                    apiFetch('/api/admin/knowledge/drafts', { signal: controller.signal }),
+                    apiFetch('/api/admin/knowledge/releases', { signal: controller.signal })
+                ]);
+                if (!isCurrentKnowledgeAdminRequest(requestGeneration, controller)) return;
+                if (!draftsResponse.ok || !releasesResponse.ok) {
+                    throw new Error('Knowledge admin request failed.');
+                }
+                const [drafts, releases] = await Promise.all([
+                    draftsResponse.json(),
+                    releasesResponse.json()
+                ]);
+                if (!isCurrentKnowledgeAdminRequest(requestGeneration, controller)) return;
+                knowledgeAdminDrafts = Array.isArray(drafts) ? drafts : [];
+                knowledgeAdminReleases = Array.isArray(releases) ? releases : [];
+                knowledgeAdminCurrentRelease = knowledgeAdminReleases.find((release) => release.status === 'current') || knowledgeAdminReleases[0] || null;
+                renderKnowledgeAdminCurrentRelease(knowledgeAdminCurrentRelease);
+                renderKnowledgeAdminDrafts(knowledgeAdminDrafts);
+                renderKnowledgeAdminReleases(knowledgeAdminReleases);
+                await loadKnowledgeAdminAuditEvents();
+                if (!knowledgeAdminDrafts.length) {
+                    renderKnowledgeAdminDraftDetail(null);
+                    return;
+                }
+                const selectedDraft = knowledgeAdminDrafts.find((draft) => draft.id === knowledgeAdminSelectedDraftId) || knowledgeAdminDrafts[0];
+                knowledgeAdminSelectedDraftId = selectedDraft.id;
+                await loadKnowledgeAdminDraftDetail(selectedDraft.id);
+                if (knowledgeAdminActiveJobId) {
+                    setKnowledgeAdminStatus(`任务 ${knowledgeAdminActiveJobId} ${knowledgeAdminJobLabel('running')}`);
+                } else {
+                    setKnowledgeAdminStatus('等待上传');
+                }
+            } catch (error) {
+                if (error instanceof UnauthorizedError || error.name === 'AbortError') return;
+                if (isCurrentKnowledgeAdminRequest(requestGeneration, controller)) {
+                    setKnowledgeAdminStatus('无法加载知识管理数据，请稍后重试。', 'text-error');
+                    if (knowledgeAdminCurrentReleaseSummary) {
+                        knowledgeAdminCurrentReleaseSummary.textContent = '知识管理数据不可用。';
+                    }
+                    if (knowledgeAdminDraftList) {
+                        knowledgeAdminDraftList.replaceChildren();
+                    }
+                }
+            } finally {
+                if (activeKnowledgeAdminRequestController === controller) {
+                    activeKnowledgeAdminRequestController = null;
+                }
+            }
+        }
+
+        async function loadKnowledgeAdminJob(jobId) {
+            if (!isAdmin() || !jobId) return;
+            const requestGeneration = ++knowledgeAdminRequestGeneration;
+            activeKnowledgeAdminRequestController?.abort();
+            const controller = new AbortController();
+            activeKnowledgeAdminRequestController = controller;
+            try {
+                const response = await apiFetch(`/api/admin/knowledge/jobs/${encodeURIComponent(jobId)}`, {
+                    signal: controller.signal
+                });
+                if (!isCurrentKnowledgeAdminRequest(requestGeneration, controller)) return;
+                if (!response.ok) {
+                    throw new Error(`Knowledge job request failed with status ${response.status}.`);
+                }
+                const job = await response.json();
+                if (!isCurrentKnowledgeAdminRequest(requestGeneration, controller)) return;
+                knowledgeAdminActiveJobId = job.status === 'queued' || job.status === 'running' ? job.id : null;
+                if (knowledgeAdminJobStatus) {
+                    knowledgeAdminJobStatus.textContent = `${knowledgeAdminJobLabel(job.status)} · ${job.kind || '未知任务'}`;
+                }
+                setKnowledgeAdminActionState();
+                if (job.draft_id) {
+                    knowledgeAdminSelectedDraftId = job.draft_id;
+                }
+                if (job.release_build_id) {
+                    knowledgeAdminSelectedReleaseBuildId = job.release_build_id;
+                }
+                if (job.status === 'succeeded' || job.status === 'failed') {
+                    clearKnowledgeAdminPollTimer();
+                    knowledgeAdminActiveJobId = null;
+                    setKnowledgeAdminActionState();
+                    await loadKnowledgeAdminData();
+                    return;
+                }
+                if (job.status === 'queued' || job.status === 'running') {
+                    setKnowledgeAdminStatus(`任务 ${job.id} ${knowledgeAdminJobLabel(job.status)}`);
+                }
+            } catch (error) {
+                if (error instanceof UnauthorizedError || error.name === 'AbortError') return;
+                if (isCurrentKnowledgeAdminRequest(requestGeneration, controller)) {
+                    setKnowledgeAdminStatus('知识任务状态不可用，请稍后重试。', 'text-error');
+                }
+            } finally {
+                if (activeKnowledgeAdminRequestController === controller) {
+                    activeKnowledgeAdminRequestController = null;
+                }
+            }
+        }
+
+        function startKnowledgeAdminJobPolling(jobId) {
+            if (!jobId) return;
+            clearKnowledgeAdminPollTimer();
+            knowledgeAdminActiveJobId = jobId;
+            setKnowledgeAdminActionState();
+            void loadKnowledgeAdminJob(jobId);
+            knowledgeAdminJobPollTimer = setInterval(() => {
+                void loadKnowledgeAdminJob(jobId);
+            }, 2000);
+        }
+
+        async function submitKnowledgeAdminUpload(event) {
+            event.preventDefault();
+            if (!knowledgeAdminUploadInput || !knowledgeAdminUploadStatus || !knowledgeAdminUploadError) return;
+            const file = knowledgeAdminUploadInput.files?.[0] || null;
+            if (!file) {
+                knowledgeAdminUploadError.textContent = '请选择一个 ZIP 文件。';
+                knowledgeAdminUploadError.classList.remove('hidden');
+                return;
+            }
+            knowledgeAdminUploadError.textContent = '';
+            knowledgeAdminUploadError.classList.add('hidden');
+            setKnowledgeAdminStatus('正在上传并校验…');
+            if (knowledgeAdminUploadFilename) {
+                knowledgeAdminUploadFilename.textContent = file.name;
+            }
+            const controller = new AbortController();
+            activeKnowledgeAdminRequestController?.abort();
+            activeKnowledgeAdminRequestController = controller;
+            const requestGeneration = ++knowledgeAdminRequestGeneration;
+            try {
+                const formData = new FormData();
+                formData.append('package', file, file.name);
+                const response = await apiFetch('/api/admin/knowledge/drafts', {
+                    method: 'POST',
+                    body: formData,
+                    signal: controller.signal
+                });
+                if (!isCurrentKnowledgeAdminRequest(requestGeneration, controller)) return;
+                if (!response.ok) {
+                    throw new Error(`Knowledge upload failed with status ${response.status}.`);
+                }
+                const payload = await response.json();
+                if (!isCurrentKnowledgeAdminRequest(requestGeneration, controller)) return;
+                knowledgeAdminSelectedDraftId = payload.draft_id || null;
+                await loadKnowledgeAdminData();
+                if (payload.job_id) {
+                    startKnowledgeAdminJobPolling(payload.job_id);
+                }
+                if (payload.draft_id) {
+                    await loadKnowledgeAdminDraftDetail(payload.draft_id);
+                }
+            } catch (error) {
+                if (error instanceof UnauthorizedError || error.name === 'AbortError') return;
+                console.error('Knowledge upload failed:', error);
+                knowledgeAdminUploadError.textContent = '上传失败，请稍后重试。';
+                knowledgeAdminUploadError.classList.remove('hidden');
+                setKnowledgeAdminStatus('上传失败，请稍后重试。', 'text-error');
+            } finally {
+                if (activeKnowledgeAdminRequestController === controller) {
+                    activeKnowledgeAdminRequestController = null;
+                }
+                setKnowledgeAdminActionState();
+            }
+        }
+
+        async function submitKnowledgeAdminRollback(event) {
+            event.preventDefault();
+            if (!knowledgeAdminSelectedReleaseBuildId || !knowledgeAdminRollbackReason) return;
+            const reason = knowledgeAdminRollbackReason.value.trim();
+            if (!reason) return;
+            setKnowledgeAdminStatus('正在提交回滚…');
+            const controller = new AbortController();
+            activeKnowledgeAdminRequestController?.abort();
+            activeKnowledgeAdminRequestController = controller;
+            const requestGeneration = ++knowledgeAdminRequestGeneration;
+            try {
+                const response = await apiFetch(`/api/admin/knowledge/releases/${encodeURIComponent(knowledgeAdminSelectedReleaseBuildId)}/rollback`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason }),
+                    signal: controller.signal
+                });
+                if (!isCurrentKnowledgeAdminRequest(requestGeneration, controller)) return;
+                if (!response.ok) {
+                    throw new Error(`Knowledge rollback failed with status ${response.status}.`);
+                }
+                const payload = await response.json();
+                if (payload.job_id) {
+                    startKnowledgeAdminJobPolling(payload.job_id);
+                }
+                closeKnowledgeAdminRollbackDialog();
+                await loadKnowledgeAdminData();
+            } catch (error) {
+                if (error instanceof UnauthorizedError || error.name === 'AbortError') return;
+                console.error('Knowledge rollback failed:', error);
+                setKnowledgeAdminStatus('回滚失败，请稍后重试。', 'text-error');
+            } finally {
+                if (activeKnowledgeAdminRequestController === controller) {
+                    activeKnowledgeAdminRequestController = null;
+                }
+                setKnowledgeAdminActionState();
+            }
+        }
+
+        async function triggerKnowledgeAdminDraftAction(action) {
+            if (!knowledgeAdminSelectedDraftId || knowledgeAdminActiveJobId) return;
+            const endpoint = action === 'validate'
+                ? `/api/admin/knowledge/drafts/${encodeURIComponent(knowledgeAdminSelectedDraftId)}/validate`
+                : `/api/admin/knowledge/drafts/${encodeURIComponent(knowledgeAdminSelectedDraftId)}/publish`;
+            setKnowledgeAdminStatus(action === 'validate' ? '正在提交校验…' : '正在提交发布…');
+            const controller = new AbortController();
+            activeKnowledgeAdminRequestController?.abort();
+            activeKnowledgeAdminRequestController = controller;
+            const requestGeneration = ++knowledgeAdminRequestGeneration;
+            try {
+                const response = await apiFetch(endpoint, {
+                    method: 'POST',
+                    signal: controller.signal
+                });
+                if (!isCurrentKnowledgeAdminRequest(requestGeneration, controller)) return;
+                if (!response.ok) {
+                    throw new Error(`Knowledge admin action failed with status ${response.status}.`);
+                }
+                const payload = await response.json();
+                if (payload.job_id) {
+                    startKnowledgeAdminJobPolling(payload.job_id);
+                }
+                await loadKnowledgeAdminData();
+                if (knowledgeAdminSelectedDraftId) {
+                    await loadKnowledgeAdminDraftDetail(knowledgeAdminSelectedDraftId);
+                }
+            } catch (error) {
+                if (error instanceof UnauthorizedError || error.name === 'AbortError') return;
+                console.error('Knowledge admin action failed:', error);
+                setKnowledgeAdminStatus(action === 'validate' ? '校验失败，请稍后重试。' : '发布失败，请稍后重试。', 'text-error');
+            } finally {
+                if (activeKnowledgeAdminRequestController === controller) {
+                    activeKnowledgeAdminRequestController = null;
+                }
+                setKnowledgeAdminActionState();
+            }
+        }
+
         function clearAuthenticatedState() {
             currentUser = null;
             document.querySelectorAll('[data-current-username], [data-current-role]').forEach((element) => {
@@ -518,6 +1391,7 @@
             activeHistoryConversation = null;
             clearStoredThreadState();
             clearMonitoringState();
+            clearKnowledgeAdminState();
             clearAppStatus();
             historyList?.replaceChildren();
             chatMessages?.replaceChildren();
@@ -552,6 +1426,7 @@
             document.activeElement?.blur();
             setSending(false);
             setMonitoringAccess();
+            setKnowledgeAdminAccess();
             showLoginView();
         }
 
@@ -569,6 +1444,7 @@
 
         async function activateAuthenticatedWorkspace(user, { reuseStoredThread }) {
             clearMonitoringState();
+            clearKnowledgeAdminState();
             currentUser = user;
             prepareAuthenticatedThread({ reuseStoredThread });
             document.querySelectorAll('[data-current-username]').forEach((element) => {
@@ -579,6 +1455,7 @@
             });
             clearAppStatus();
             setMonitoringAccess();
+            setKnowledgeAdminAccess();
             authGate?.classList.add('hidden');
             appShell?.classList.remove('hidden');
             await loadConversationHistory();
@@ -1181,15 +2058,31 @@
             if (!isAdmin()) return;
             activeRequestController?.abort();
             setSending(false);
+            clearKnowledgeAdminState();
             chatWorkspace?.classList.add('hidden');
             messageThreadRail?.classList.add('hidden');
             monitoringWorkspace?.classList.remove('hidden');
             loadMonitoringData();
         }
 
+        function enterKnowledgeAdminState() {
+            if (!isAdmin()) return;
+            activeRequestController?.abort();
+            setSending(false);
+            clearMonitoringState();
+            chatWorkspace?.classList.add('hidden');
+            messageThreadRail?.classList.add('hidden');
+            monitoringWorkspace?.classList.add('hidden');
+            knowledgeAdminWorkspace?.classList.remove('hidden');
+            knowledgeAdminWorkspace?.classList.add('flex');
+            void loadKnowledgeAdminData();
+        }
+
         function enterChatState() {
             clearMonitoringState();
+            clearKnowledgeAdminState();
             monitoringWorkspace?.classList.add('hidden');
+            knowledgeAdminWorkspace?.classList.add('hidden');
             chatWorkspace?.classList.remove('hidden');
         }
 
@@ -1341,10 +2234,28 @@
         document.querySelectorAll('[data-monitoring-trigger]').forEach((button) => {
             button.addEventListener('click', enterMonitoringState);
         });
+        document.querySelectorAll('[data-knowledge-admin-trigger]').forEach((button) => {
+            button.addEventListener('click', enterKnowledgeAdminState);
+        });
         document.querySelector('[data-monitoring-refresh]')?.addEventListener('click', loadMonitoringData);
+        knowledgeAdminRefreshButton?.addEventListener('click', refreshKnowledgeAdminData);
         document.querySelectorAll('[data-monitoring-tab]').forEach((button) => {
             button.addEventListener('click', () => applyMonitoringTab(button.dataset.monitoringTab));
         });
+        knowledgeAdminUploadInput?.addEventListener('change', () => {
+            if (knowledgeAdminUploadFilename) {
+                knowledgeAdminUploadFilename.textContent = knowledgeAdminUploadInput.files?.[0]?.name || '未选择文件';
+            }
+            if (knowledgeAdminUploadError) {
+                knowledgeAdminUploadError.textContent = '';
+                knowledgeAdminUploadError.classList.add('hidden');
+            }
+        });
+        knowledgeAdminUploadForm?.addEventListener('submit', submitKnowledgeAdminUpload);
+        knowledgeAdminValidateButton?.addEventListener('click', () => triggerKnowledgeAdminDraftAction('validate'));
+        knowledgeAdminPublishButton?.addEventListener('click', () => triggerKnowledgeAdminDraftAction('publish'));
+        knowledgeAdminRollbackForm?.addEventListener('submit', submitKnowledgeAdminRollback);
+        knowledgeAdminRollbackCancel?.addEventListener('click', closeKnowledgeAdminRollbackDialog);
 
         // User profile menu toggle
         const userProfileBtn = document.getElementById('user-profile-btn');
