@@ -43,13 +43,14 @@ class ReleaseListItem(_PublicSchema):
     document_count: int
     status: str
     published_at: datetime
-
-
-class ReleaseDetail(ReleaseListItem):
     artifact_sha256: str
     source_manifest_sha256: str
     draft_id: str
     validation_summary: dict[str, Any]
+
+
+class ReleaseDetail(ReleaseListItem):
+    pass
 
 
 class AuditListItem(_PublicSchema):

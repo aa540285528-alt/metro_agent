@@ -155,6 +155,19 @@ class KnowledgeAdminRepository:
             )
             if release is None:
                 raise ValueError(f"Unknown knowledge release {build_id}")
+            active_job = session.scalar(
+                select(KnowledgeJob.id)
+                .where(
+                    KnowledgeJob.kind == "rollback_release",
+                    KnowledgeJob.release_build_id == release.build_id,
+                    KnowledgeJob.status.in_(("queued", "running")),
+                )
+                .limit(1)
+            )
+            if active_job is not None:
+                raise ValueError(
+                    f"Knowledge release {build_id} already has an active rollback job"
+                )
             job = self._enqueue(
                 session,
                 kind="rollback_release",
@@ -263,6 +276,22 @@ class KnowledgeAdminRepository:
                     "Restored release does not match rollback target "
                     f"for knowledge job {job_id}"
                 )
+            restored_release = session.scalar(
+                select(KnowledgeRelease)
+                .where(KnowledgeRelease.build_id == restored_release_build_id)
+                .with_for_update()
+            )
+            if restored_release is None:  # pragma: no cover - protected by FK
+                raise ValueError(f"Unknown knowledge release {restored_release_build_id}")
+            current_releases = session.scalars(
+                select(KnowledgeRelease)
+                .where(KnowledgeRelease.status == "current")
+                .with_for_update()
+            ).all()
+            for current_release in current_releases:
+                if current_release.build_id != restored_release.build_id:
+                    current_release.status = "rolled_back"
+            restored_release.status = "current"
             job.status = "succeeded"
             job.finished_at = datetime.now(UTC)
             job.lease_expires_at = None
@@ -392,6 +421,10 @@ class KnowledgeAdminRepository:
                     document_count=release.document_count,
                     status=release.status,
                     published_at=release.published_at,
+                    artifact_sha256=release.artifact_sha256,
+                    source_manifest_sha256=release.source_manifest_sha256,
+                    draft_id=release.draft_id,
+                    validation_summary=release.validation_summary,
                 )
                 for release in releases
             ]

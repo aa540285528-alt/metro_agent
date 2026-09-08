@@ -76,7 +76,7 @@ def test_knowledge_admin_workspace_clears_transient_state_on_logout() -> None:
     assert "activeKnowledgeAdminAuditRequestController?.abort()" in cleanup
     assert "activeKnowledgeAdminAuditRequestController = null" in cleanup
     assert "clearKnowledgeAdminPollTimer()" in cleanup
-    assert "clearInterval(knowledgeAdminJobPollTimer)" in poll_timer
+    assert "clearTimeout(knowledgeAdminJobPollTimer)" in poll_timer
     assert "knowledgeAdminJobPollTimer = null" in poll_timer
     assert "knowledgeAdminDrafts = []" in cleanup
     assert "knowledgeAdminReleases = []" in cleanup
@@ -112,9 +112,11 @@ def test_knowledge_admin_upload_and_rollback_ui_surfaces_the_expected_controls()
 def test_knowledge_admin_polling_is_bounded_and_terminal_states_stop_it() -> None:
     script = _inline_application_script()
 
-    assert "setInterval" in script
+    assert "setInterval" not in script
+    assert "setTimeout" in script
     assert "2000" in script
-    assert "clearInterval" in script
+    assert "knowledgeAdminJobPollInFlight" in script
+    assert "clearTimeout" in script
     assert "job.status === 'succeeded'" in script
     assert "job.status === 'failed'" in script
     assert "refreshKnowledgeAdminData" in script

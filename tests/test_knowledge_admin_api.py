@@ -413,6 +413,9 @@ def test_knowledge_admin_routes_use_current_user_and_hide_private_fields(admin_a
     assert publish.json()["kind"] == "validate_draft"
     assert releases.status_code == 200
     assert "collection_name" not in releases.text
+    assert releases.json()[0]["artifact_sha256"] == "b" * 64
+    assert releases.json()[0]["source_manifest_sha256"] == "c" * 64
+    assert releases.json()[0]["validation_summary"] == {"valid": True}
     assert audits.status_code == 200
     audit_row = audits.json()[0]
     assert audit_row["action"] == "rollback_release"
@@ -601,6 +604,10 @@ def test_rollback_reason_is_persisted_in_audit_event_via_api(
             f"/api/admin/knowledge/releases/{RELEASE_BUILD_ID}/rollback",
             json={"reason": "restore validated release"},
         )
+        duplicate = client.post(
+            f"/api/admin/knowledge/releases/{RELEASE_BUILD_ID}/rollback",
+            json={"reason": "duplicate rollback"},
+        )
         with factory.begin() as session:
             events = {
                 (event.action, event.result): event
@@ -617,6 +624,7 @@ def test_rollback_reason_is_persisted_in_audit_event_via_api(
     assert response.status_code == 200
     assert response.json()["kind"] == "rollback_release"
     assert response.json()["status"] == "queued"
+    assert duplicate.status_code == 409
     assert audits.status_code == 200
     audit_row = audits.json()[0]
     assert audit_row["action"] == "rollback_release"

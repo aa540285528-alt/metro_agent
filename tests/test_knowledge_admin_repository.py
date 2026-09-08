@@ -227,6 +227,9 @@ def test_public_list_dtos_do_not_disclose_storage_or_collection_names(
 
     assert "storage_key" not in draft_data
     assert "collection_name" not in release_data
+    assert release_data["artifact_sha256"] == "b" * 64
+    assert release_data["source_manifest_sha256"] == "c" * 64
+    assert release_data["validation_summary"] == {"valid": True}
 
 
 def test_list_audit_events_returns_newest_rows_first_and_honors_limit(
@@ -388,6 +391,72 @@ def test_dedicated_rollback_completion_records_success_after_target_restore(
         assert job is not None and job.status == "succeeded"
         assert job.finished_at is not None and job.lease_expires_at is None
         assert audit is not None and audit.action == "rollback_release"
+
+
+def test_rollback_completion_atomically_makes_target_current(
+    repository: KnowledgeAdminRepository, session_factory: sessionmaker[Session]
+) -> None:
+    draft = create_draft(repository)
+    repository.record_release(
+        build_id="build-before-rollback",
+        collection_name="private-before-rollback",
+        artifact_sha256="b" * 64,
+        source_manifest_sha256="c" * 64,
+        draft_id=draft.id,
+        document_count=1,
+        validation_summary={"valid": True},
+        published_at=datetime(2026, 9, 7, tzinfo=UTC),
+    )
+    repository.record_release(
+        build_id="build-current-before-rollback",
+        collection_name="private-current-before-rollback",
+        artifact_sha256="d" * 64,
+        source_manifest_sha256="e" * 64,
+        draft_id=draft.id,
+        document_count=2,
+        validation_summary={"valid": True},
+        published_at=datetime(2026, 9, 8, tzinfo=UTC),
+    )
+    queued = repository.queue_rollback(
+        "build-before-rollback", actor_user_id="42", actor_username="admin"
+    )
+    repository.claim_next_job()
+
+    repository.complete_rollback_job(queued.id, "build-before-rollback")
+
+    with session_factory() as session:
+        releases = session.scalars(
+            select(KnowledgeRelease).order_by(KnowledgeRelease.build_id)
+        ).all()
+
+    assert [(release.build_id, release.status) for release in releases] == [
+        ("build-before-rollback", "current"),
+        ("build-current-before-rollback", "rolled_back"),
+    ]
+
+
+def test_queue_rollback_rejects_duplicate_active_job(
+    repository: KnowledgeAdminRepository,
+) -> None:
+    draft = create_draft(repository)
+    repository.record_release(
+        build_id="build-no-duplicate-rollback",
+        collection_name="private-no-duplicate-rollback",
+        artifact_sha256="b" * 64,
+        source_manifest_sha256="c" * 64,
+        draft_id=draft.id,
+        document_count=1,
+        validation_summary={"valid": True},
+        published_at=datetime(2026, 9, 7, tzinfo=UTC),
+    )
+    repository.queue_rollback(
+        "build-no-duplicate-rollback", actor_user_id="42", actor_username="admin"
+    )
+
+    with pytest.raises(ValueError, match="active rollback"):
+        repository.queue_rollback(
+            "build-no-duplicate-rollback", actor_user_id="42", actor_username="admin"
+        )
 
 
 def test_dedicated_rollback_completion_rejects_wrong_target_without_state_change(

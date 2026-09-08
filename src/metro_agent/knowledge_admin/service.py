@@ -133,7 +133,10 @@ class KnowledgeAdminService:
         try:
             return self.repository.get_draft(str(draft_id))
         except ValueError as exc:
-            raise KnowledgeAdminNotFoundError(str(exc)) from exc
+            message = str(exc)
+            if message.startswith("Unknown knowledge"):
+                raise KnowledgeAdminNotFoundError(message) from exc
+            raise KnowledgeAdminInvalidStateError(message) from exc
 
     def queue_validation(self, draft_id: str, *, current_user: CurrentUser) -> Any:
         return self._queue_job(
@@ -166,7 +169,10 @@ class KnowledgeAdminService:
                 actor_username=current_user.username,
             )
         except ValueError as exc:
-            raise KnowledgeAdminNotFoundError(str(exc)) from exc
+            message = str(exc)
+            if message.startswith("Unknown knowledge"):
+                raise KnowledgeAdminNotFoundError(message) from exc
+            raise KnowledgeAdminInvalidStateError(message) from exc
 
     def get_job(self, job_id: str) -> Any:
         try:

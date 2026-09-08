@@ -558,7 +558,10 @@
         let activeKnowledgeAdminDetailRequestController = null;
         let knowledgeAdminAuditRequestGeneration = 0;
         let activeKnowledgeAdminAuditRequestController = null;
+        let knowledgeAdminJobRequestGeneration = 0;
+        let activeKnowledgeAdminJobRequestController = null;
         let knowledgeAdminJobPollTimer = null;
+        let knowledgeAdminJobPollInFlight = false;
         let knowledgeAdminDrafts = [];
         let knowledgeAdminReleases = [];
         let knowledgeAdminAuditEvents = [];
@@ -671,9 +674,13 @@
 
         function clearKnowledgeAdminPollTimer() {
             if (knowledgeAdminJobPollTimer !== null) {
-                clearInterval(knowledgeAdminJobPollTimer);
+                clearTimeout(knowledgeAdminJobPollTimer);
                 knowledgeAdminJobPollTimer = null;
             }
+            knowledgeAdminJobRequestGeneration += 1;
+            activeKnowledgeAdminJobRequestController?.abort();
+            activeKnowledgeAdminJobRequestController = null;
+            knowledgeAdminJobPollInFlight = false;
         }
 
         function setKnowledgeAdminActionState() {
@@ -724,6 +731,12 @@
             return isAdmin()
                 && requestGeneration === knowledgeAdminAuditRequestGeneration
                 && activeKnowledgeAdminAuditRequestController === controller;
+        }
+
+        function isCurrentKnowledgeAdminJobRequest(requestGeneration, controller) {
+            return isAdmin()
+                && requestGeneration === knowledgeAdminJobRequestGeneration
+                && activeKnowledgeAdminJobRequestController === controller;
         }
 
         function renderKnowledgeAdminMetric(label, value) {
@@ -882,7 +895,7 @@
                 title.textContent = release.build_id || '未命名构建';
                 const meta = document.createElement('p');
                 meta.className = 'mt-1 text-xs text-on-surface-variant whitespace-pre-wrap';
-                meta.textContent = `${release.published_at || '未知时间'} · ${release.collection_name || '未知集合'} · ${release.document_count === null || release.document_count === undefined ? '—' : `${release.document_count} 份文档`}`;
+                meta.textContent = `${release.published_at || '未知时间'} · 来源哈希：${release.source_manifest_sha256 || '—'} · ${release.document_count === null || release.document_count === undefined ? '—' : `${release.document_count} 份文档`}`;
                 titleBlock.append(title, meta);
                 const badge = document.createElement('span');
                 badge.className = 'rounded-full border border-outline-variant px-2 py-0.5 text-[11px] text-on-surface-variant';
@@ -949,6 +962,9 @@
             knowledgeAdminAuditRequestGeneration += 1;
             activeKnowledgeAdminAuditRequestController?.abort();
             activeKnowledgeAdminAuditRequestController = null;
+            knowledgeAdminJobRequestGeneration += 1;
+            activeKnowledgeAdminJobRequestController?.abort();
+            activeKnowledgeAdminJobRequestController = null;
             clearKnowledgeAdminPollTimer();
             knowledgeAdminDrafts = [];
             knowledgeAdminReleases = [];
@@ -1180,21 +1196,21 @@
         }
 
         async function loadKnowledgeAdminJob(jobId) {
-            if (!isAdmin() || !jobId) return;
-            const requestGeneration = ++knowledgeAdminRequestGeneration;
-            activeKnowledgeAdminRequestController?.abort();
+            if (!isAdmin() || !jobId || knowledgeAdminJobPollInFlight) return;
+            knowledgeAdminJobPollInFlight = true;
+            const requestGeneration = ++knowledgeAdminJobRequestGeneration;
             const controller = new AbortController();
-            activeKnowledgeAdminRequestController = controller;
+            activeKnowledgeAdminJobRequestController = controller;
             try {
                 const response = await apiFetch(`/api/admin/knowledge/jobs/${encodeURIComponent(jobId)}`, {
                     signal: controller.signal
                 });
-                if (!isCurrentKnowledgeAdminRequest(requestGeneration, controller)) return;
+                if (!isCurrentKnowledgeAdminJobRequest(requestGeneration, controller)) return;
                 if (!response.ok) {
                     throw new Error(`Knowledge job request failed with status ${response.status}.`);
                 }
                 const job = await response.json();
-                if (!isCurrentKnowledgeAdminRequest(requestGeneration, controller)) return;
+                if (!isCurrentKnowledgeAdminJobRequest(requestGeneration, controller)) return;
                 knowledgeAdminActiveJobId = job.status === 'queued' || job.status === 'running' ? job.id : null;
                 if (knowledgeAdminJobStatus) {
                     knowledgeAdminJobStatus.textContent = `${knowledgeAdminJobLabel(job.status)} · ${job.kind || '未知任务'}`;
@@ -1218,14 +1234,24 @@
                 }
             } catch (error) {
                 if (error instanceof UnauthorizedError || error.name === 'AbortError') return;
-                if (isCurrentKnowledgeAdminRequest(requestGeneration, controller)) {
+                if (isCurrentKnowledgeAdminJobRequest(requestGeneration, controller)) {
                     setKnowledgeAdminStatus('知识任务状态不可用，请稍后重试。', 'text-error');
                 }
             } finally {
-                if (activeKnowledgeAdminRequestController === controller) {
-                    activeKnowledgeAdminRequestController = null;
+                if (activeKnowledgeAdminJobRequestController === controller) {
+                    activeKnowledgeAdminJobRequestController = null;
                 }
+                knowledgeAdminJobPollInFlight = false;
             }
+        }
+
+        async function pollKnowledgeAdminJob(jobId) {
+            await loadKnowledgeAdminJob(jobId);
+            if (!isAdmin() || knowledgeAdminActiveJobId !== jobId || knowledgeAdminJobPollTimer !== null) return;
+            knowledgeAdminJobPollTimer = setTimeout(() => {
+                knowledgeAdminJobPollTimer = null;
+                void pollKnowledgeAdminJob(jobId);
+            }, 2000);
         }
 
         function startKnowledgeAdminJobPolling(jobId) {
@@ -1233,10 +1259,7 @@
             clearKnowledgeAdminPollTimer();
             knowledgeAdminActiveJobId = jobId;
             setKnowledgeAdminActionState();
-            void loadKnowledgeAdminJob(jobId);
-            knowledgeAdminJobPollTimer = setInterval(() => {
-                void loadKnowledgeAdminJob(jobId);
-            }, 2000);
+            void pollKnowledgeAdminJob(jobId);
         }
 
         async function submitKnowledgeAdminUpload(event) {
