@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from metro_agent.knowledge.config import (
 )
 from metro_agent.knowledge.publication_lock import PublicationLock
 from metro_agent.knowledge.releases import restore_validated_release
+from metro_agent.knowledge.releases import read_validated_release
 from metro_agent.knowledge.source_validation import validate_source_root
 from metro_agent.knowledge_admin.repository import KnowledgeAdminRepository
 from metro_agent.knowledge_admin.zip_staging import stage_zip_knowledge_package
@@ -127,9 +129,24 @@ class KnowledgePublisherService:
         draft = self.repository.get_draft(self._required_draft_id(job))
         self._require_draft_status(draft, "ready_to_publish")
         source_root = self._staged_source_root(draft)
-        validate_source_root(source_root)
+        validated_source = validate_source_root(source_root)
         result = self.indexer.build_and_publish_from_staged_source(source_root)
-        self.repository.complete_job(job.id)
+        build_id = result.get("build_id")
+        if not isinstance(build_id, str) or not build_id:
+            raise KnowledgePublisherError("indexer must return a build_id")
+        release = read_validated_release(self.artifact_root, build_id)
+        validation_summary = self._validation_report(draft, validated_source)
+        self.repository.complete_publish_job(
+            job.id,
+            build_id=release.build_id,
+            collection_name=release.collection_name,
+            artifact_sha256=release.sha256,
+            source_manifest_sha256=release.source_tree_sha256,
+            draft_id=draft.id,
+            document_count=validation_summary["document_count"],
+            validation_summary=validation_summary,
+            published_at=datetime.now(UTC),
+        )
         return dict(result)
 
     def _rollback_release(self, job: KnowledgeJob | Any) -> dict[str, Any]:

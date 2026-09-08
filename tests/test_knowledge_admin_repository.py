@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -134,6 +134,23 @@ def test_claim_and_failure_are_atomic_and_allow_revalidation(
         assert retried.id != queued.id
 
 
+def test_claim_next_job_uses_a_fifteen_minute_default_lease(
+    repository: KnowledgeAdminRepository,
+) -> None:
+    draft = create_draft(repository)
+    queued = repository.queue_validation(
+        draft.id, actor_user_id="42", actor_username="admin"
+    )
+
+    claimed = repository.claim_next_job()
+
+    assert claimed is not None
+    assert claimed.id == queued.id
+    assert claimed.started_at is not None
+    assert claimed.lease_expires_at is not None
+    assert claimed.lease_expires_at - claimed.started_at == timedelta(seconds=900)
+
+
 def test_published_draft_cannot_be_queued_for_publish_again(
     repository: KnowledgeAdminRepository,
 ) -> None:
@@ -151,6 +168,43 @@ def test_published_draft_cannot_be_queued_for_publish_again(
 
     with pytest.raises(ValueError, match="published.*publishing"):
         repository.queue_publish(draft.id, actor_user_id="42", actor_username="admin")
+
+
+def test_complete_publish_job_records_the_release_and_finalizes_the_draft(
+    repository: KnowledgeAdminRepository, session_factory: sessionmaker[Session]
+) -> None:
+    draft = create_draft(repository)
+    validation = repository.queue_validation(
+        draft.id, actor_user_id="42", actor_username="admin"
+    )
+    repository.claim_next_job()
+    repository.complete_job(validation.id, validation_report={"valid": True, "document_count": 1})
+    publish = repository.queue_publish(
+        draft.id, actor_user_id="42", actor_username="admin"
+    )
+    repository.claim_next_job()
+
+    release = repository.complete_publish_job(
+        publish.id,
+        build_id="build-atomic",
+        collection_name="private-atomic",
+        artifact_sha256="b" * 64,
+        source_manifest_sha256="c" * 64,
+        draft_id=draft.id,
+        document_count=1,
+        validation_summary={"valid": True, "document_count": 1},
+        published_at=datetime(2026, 9, 8, tzinfo=UTC),
+    )
+
+    with session_factory() as session:
+        stored_draft = session.get(KnowledgeDraft, draft.id)
+        stored_job = session.get(KnowledgeJob, publish.id)
+        stored_release = session.get(KnowledgeRelease, "build-atomic")
+        assert release.build_id == "build-atomic"
+        assert stored_draft is not None and stored_draft.status == "published"
+        assert stored_job is not None and stored_job.status == "succeeded"
+        assert stored_release is not None and stored_release.status == "current"
+        assert stored_release.validation_summary == {"valid": True, "document_count": 1}
 
 
 def test_public_list_dtos_do_not_disclose_storage_or_collection_names(

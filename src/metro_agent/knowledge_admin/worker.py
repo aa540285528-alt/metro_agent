@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,6 +14,9 @@ from metro_agent.knowledge_admin.service import (
     KnowledgePublisherService,
     build_default_service,
 )
+
+MAX_INTERNAL_UPLOAD_BYTES = 100 * 1024 * 1024
+INTERNAL_UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 def create_app(
@@ -120,9 +122,28 @@ async def _wait_for_stop_or_timeout(
 
 def _persist_upload(package: UploadFile, staging_root: Path) -> Path:
     staging_root.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("wb", suffix=".zip", delete=False) as handle:
-        shutil.copyfileobj(package.file, handle)
-        return Path(handle.name)
+    target_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("wb", suffix=".zip", delete=False) as handle:
+            target_path = Path(handle.name)
+            bytes_written = 0
+            while True:
+                chunk = package.file.read(INTERNAL_UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                next_size = bytes_written + len(chunk)
+                if next_size > MAX_INTERNAL_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Uploaded package exceeds the internal size limit",
+                    )
+                handle.write(chunk)
+                bytes_written = next_size
+            return target_path
+    except Exception:
+        if target_path is not None:
+            target_path.unlink(missing_ok=True)
+        raise
 
 
 app = create_app()

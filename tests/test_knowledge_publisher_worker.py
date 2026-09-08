@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -8,8 +9,10 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+import metro_agent.knowledge_admin.worker as worker_module
 from metro_agent.knowledge_admin.worker import KnowledgePublisherService, create_app
 
 
@@ -43,6 +46,8 @@ class FakeRepository:
         self.created_drafts: list[dict[str, object]] = []
         self.queued_jobs: list[dict[str, object]] = []
         self.completed_jobs: list[tuple[str, dict[str, object] | None]] = []
+        self.publish_completions: list[dict[str, object]] = []
+        self.published_releases: list[dict[str, object]] = []
         self.failed_jobs: list[tuple[str, str]] = []
         self.rolled_back_jobs: list[tuple[str, str]] = []
         self.drafts: dict[str, SimpleNamespace] = {}
@@ -142,6 +147,49 @@ class FakeRepository:
             draft.status = "ready_to_publish"
         elif job.kind == "publish_draft":
             self.drafts[job.draft_id].status = "published"
+
+    def complete_publish_job(
+        self,
+        job_id: str,
+        *,
+        build_id: str,
+        collection_name: str,
+        artifact_sha256: str,
+        source_manifest_sha256: str,
+        draft_id: str,
+        document_count: int,
+        validation_summary: dict[str, object],
+        published_at: object | None = None,
+    ) -> SimpleNamespace:
+        self.publish_completions.append(
+            {
+                "job_id": job_id,
+                "build_id": build_id,
+                "collection_name": collection_name,
+                "artifact_sha256": artifact_sha256,
+                "source_manifest_sha256": source_manifest_sha256,
+                "draft_id": draft_id,
+                "document_count": document_count,
+                "validation_summary": validation_summary,
+                "published_at": published_at,
+            }
+        )
+        self.drafts[draft_id].status = "published"
+        self.drafts[draft_id].validation_report = validation_summary
+        self.jobs[job_id].status = "succeeded"
+        release = SimpleNamespace(
+            build_id=build_id,
+            collection_name=collection_name,
+            artifact_sha256=artifact_sha256,
+            source_manifest_sha256=source_manifest_sha256,
+            draft_id=draft_id,
+            document_count=document_count,
+            validation_summary=validation_summary,
+            published_at=published_at,
+            status="current",
+        )
+        self.published_releases.append(release.__dict__)
+        return release
 
     def complete_rollback_job(
         self, job_id: str, restored_release_build_id: str
@@ -370,6 +418,55 @@ def test_internal_draft_upload_removes_staged_source_when_repository_call_fails(
         shutil.rmtree(temp_root, ignore_errors=True)
 
 
+def test_internal_draft_upload_streams_and_rejects_oversized_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    temp_root = SCRATCH_ROOT / f"publisher-{uuid4().hex}"
+    temp_root.mkdir(parents=True, exist_ok=False)
+    try:
+        reads: list[int] = []
+        created_paths: list[Path] = []
+        original_named_temporary_file = tempfile.NamedTemporaryFile
+        (temp_root / "tmp").mkdir(parents=True, exist_ok=True)
+
+        class FakeUploadStream:
+            def __init__(self) -> None:
+                self._chunks = [b"abcd", b"ef"]
+
+            def read(self, size: int) -> bytes:
+                reads.append(size)
+                if self._chunks:
+                    return self._chunks.pop(0)
+                return b""
+
+        class FakeUpload:
+            filename = "knowledge.zip"
+            file = FakeUploadStream()
+
+        def fake_named_temporary_file(*args: object, **kwargs: object):
+            kwargs = dict(kwargs)
+            kwargs["dir"] = temp_root / "tmp"
+            handle = original_named_temporary_file(*args, **kwargs)
+            created_paths.append(Path(handle.name))
+            return handle
+
+        monkeypatch.setattr(worker_module, "MAX_INTERNAL_UPLOAD_BYTES", 5)
+        monkeypatch.setattr(
+            worker_module.tempfile,
+            "NamedTemporaryFile",
+            fake_named_temporary_file,
+        )
+
+        with pytest.raises(HTTPException, match="Uploaded package exceeds"):
+            worker_module._persist_upload(FakeUpload(), temp_root / "staging")
+
+        assert reads
+        assert all(size == worker_module.INTERNAL_UPLOAD_CHUNK_BYTES for size in reads)
+        assert created_paths and not created_paths[0].exists()
+    finally:
+        shutil.rmtree(temp_root, ignore_errors=True)
+
+
 def test_worker_lifespan_processes_jobs_and_stops_gracefully() -> None:
     class ConsumerService:
         def __init__(self) -> None:
@@ -502,6 +599,16 @@ def test_fixed_jobs_validate_publish_rollback_and_get_status_run_in_python_only(
             before_publish()
             return SimpleNamespace(current_build_id="build-restored")
 
+        def fake_read_validated_release(artifact_root: Path, build_id: str) -> SimpleNamespace:
+            assert artifact_root == temp_root / "artifacts"
+            assert build_id == "build-1"
+            return SimpleNamespace(
+                build_id="build-1",
+                collection_name="private-collection__build_build-1",
+                sha256="d" * 64,
+                source_tree_sha256="e" * 64,
+            )
+
         monkeypatch.setattr(
             "metro_agent.knowledge_admin.service.PublicationLock",
             DummyPublicationLock,
@@ -513,6 +620,10 @@ def test_fixed_jobs_validate_publish_rollback_and_get_status_run_in_python_only(
         monkeypatch.setattr(
             "metro_agent.knowledge_admin.service.validate_source_root",
             wrapped_validate,
+        )
+        monkeypatch.setattr(
+            "metro_agent.knowledge_admin.service.read_validated_release",
+            fake_read_validated_release,
         )
 
         service = KnowledgePublisherService(
@@ -538,6 +649,28 @@ def test_fixed_jobs_validate_publish_rollback_and_get_status_run_in_python_only(
         assert repo.drafts["draft-123"].status == "published"
         assert indexer.calls == [source_root]
         assert publish_result == {"status": "published", "build_id": "build-1"}
+        assert len(repo.publish_completions) == 1
+        publish_completion = repo.publish_completions[0]
+        assert publish_completion["job_id"] == "job-publish"
+        assert publish_completion["build_id"] == "build-1"
+        assert publish_completion["collection_name"] == "private-collection__build_build-1"
+        assert publish_completion["artifact_sha256"] == "d" * 64
+        assert publish_completion["source_manifest_sha256"] == "e" * 64
+        assert publish_completion["draft_id"] == "draft-123"
+        assert publish_completion["document_count"] == 1
+        assert publish_completion["validation_summary"] == {
+            "status": "valid",
+            "draft_id": "draft-123",
+            "original_filename": "knowledge.zip",
+            "package_sha256": "a" * 64,
+            "package_size_bytes": 17,
+            "document_count": 1,
+            "smoke_query_count": 1,
+            "source_tree_sha256": validate_result["source_tree_sha256"],
+            "git_commit": None,
+        }
+        assert publish_completion["published_at"] is not None
+        assert repo.published_releases[0]["build_id"] == "build-1"
         assert validate_calls == [source_root, source_root]
         assert restore_calls == [("build-old", temp_root / "artifacts")]
         assert lock_events == ["enter", "assert", "exit"]

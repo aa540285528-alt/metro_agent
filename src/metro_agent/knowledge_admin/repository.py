@@ -159,7 +159,7 @@ class KnowledgeAdminRepository:
             )
         return job
 
-    def claim_next_job(self, *, lease_seconds: int = 300) -> KnowledgeJob | None:
+    def claim_next_job(self, *, lease_seconds: int = 900) -> KnowledgeJob | None:
         now = datetime.now(UTC)
         with self._session_factory() as session, session.begin():
             job = session.scalar(self.queued_job_claim_statement())
@@ -203,6 +203,48 @@ class KnowledgeAdminRepository:
             job.finished_at = datetime.now(UTC)
             job.lease_expires_at = None
             self._audit_for_job(session, job, "succeeded")
+
+    def complete_publish_job(
+        self,
+        job_id: str,
+        *,
+        build_id: str,
+        collection_name: str,
+        artifact_sha256: str,
+        source_manifest_sha256: str,
+        draft_id: str,
+        document_count: int,
+        validation_summary: dict[str, Any],
+        published_at: datetime | None = None,
+    ) -> KnowledgeRelease:
+        with self._session_factory() as session, session.begin():
+            job = self._locked_running_job(session, job_id)
+            if job.kind != "publish_draft":
+                raise ValueError(f"Knowledge job {job_id} is not a publish_draft")
+            if job.draft_id != draft_id:
+                raise ValueError(
+                    f"Knowledge job {job_id} does not target knowledge draft {draft_id}"
+                )
+            draft = self._locked_draft(session, draft_id)
+            release = self._record_release(
+                session,
+                build_id=build_id,
+                collection_name=collection_name,
+                artifact_sha256=artifact_sha256,
+                source_manifest_sha256=source_manifest_sha256,
+                draft_id=draft.id,
+                document_count=document_count,
+                validation_summary=validation_summary,
+                published_at=published_at or datetime.now(UTC),
+            )
+            if draft.status == "ready_to_publish":
+                transition_draft(draft, "publishing")
+            transition_draft(draft, "published")
+            job.status = "succeeded"
+            job.finished_at = datetime.now(UTC)
+            job.lease_expires_at = None
+            self._audit_for_job(session, job, "succeeded")
+            return release
 
     def complete_rollback_job(self, job_id: str, restored_release_build_id: str) -> None:
         """Record a worker-completed rollback after it restored the validated target."""
@@ -251,6 +293,32 @@ class KnowledgeAdminRepository:
         validation_summary: dict[str, Any],
         published_at: datetime,
     ) -> KnowledgeRelease:
+        with self._session_factory() as session, session.begin():
+            return self._record_release(
+                session,
+                build_id=build_id,
+                collection_name=collection_name,
+                artifact_sha256=artifact_sha256,
+                source_manifest_sha256=source_manifest_sha256,
+                draft_id=draft_id,
+                document_count=document_count,
+                validation_summary=validation_summary,
+                published_at=published_at,
+            )
+
+    def _record_release(
+        self,
+        session: Session,
+        *,
+        build_id: str,
+        collection_name: str,
+        artifact_sha256: str,
+        source_manifest_sha256: str,
+        draft_id: str,
+        document_count: int,
+        validation_summary: dict[str, Any],
+        published_at: datetime,
+    ) -> KnowledgeRelease:
         release = KnowledgeRelease(
             build_id=build_id,
             collection_name=collection_name,
@@ -262,17 +330,16 @@ class KnowledgeAdminRepository:
             published_at=published_at,
             status="current",
         )
-        with self._session_factory() as session, session.begin():
-            if session.get(KnowledgeDraft, draft_id) is None:
-                raise ValueError(f"Unknown knowledge draft {draft_id}")
-            current_releases = session.scalars(
-                select(KnowledgeRelease)
-                .where(KnowledgeRelease.status == "current")
-                .with_for_update()
-            ).all()
-            for current_release in current_releases:
-                current_release.status = "superseded"
-            session.add(release)
+        if session.get(KnowledgeDraft, draft_id) is None:
+            raise ValueError(f"Unknown knowledge draft {draft_id}")
+        current_releases = session.scalars(
+            select(KnowledgeRelease)
+            .where(KnowledgeRelease.status == "current")
+            .with_for_update()
+        ).all()
+        for current_release in current_releases:
+            current_release.status = "superseded"
+        session.add(release)
         return release
 
     def list_drafts(self) -> list[DraftListItem]:
