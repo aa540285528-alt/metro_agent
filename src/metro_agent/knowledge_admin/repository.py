@@ -140,7 +140,12 @@ class KnowledgeAdminRepository:
         return job
 
     def queue_rollback(
-        self, build_id: str, *, actor_user_id: str, actor_username: str
+        self,
+        build_id: str,
+        *,
+        actor_user_id: str,
+        actor_username: str,
+        reason_summary: str | None = None,
     ) -> KnowledgeJob:
         with self._session_factory() as session, session.begin():
             release = session.scalar(
@@ -156,6 +161,7 @@ class KnowledgeAdminRepository:
                 release_build_id=release.build_id,
                 actor_user_id=actor_user_id,
                 actor_username=actor_username,
+                reason_summary=reason_summary,
             )
         return job
 
@@ -368,6 +374,13 @@ class KnowledgeAdminRepository:
                 raise ValueError(f"Unknown knowledge draft {draft_id}")
             return draft
 
+    def get_job(self, job_id: str) -> KnowledgeJob:
+        with self._session_factory() as session:
+            job = session.get(KnowledgeJob, job_id)
+            if job is None:
+                raise ValueError(f"Unknown knowledge job {job_id}")
+            return job
+
     def list_releases(self) -> list[ReleaseListItem]:
         with self._session_factory() as session:
             releases = session.scalars(
@@ -420,6 +433,7 @@ class KnowledgeAdminRepository:
         actor_username: str,
         draft_id: str | None = None,
         release_build_id: str | None = None,
+        reason_summary: str | None = None,
     ) -> KnowledgeJob:
         if kind not in JOB_KINDS:
             raise ValueError(f"Unsupported knowledge job kind {kind}")
@@ -433,7 +447,7 @@ class KnowledgeAdminRepository:
         )
         session.add(job)
         session.flush()
-        self._audit_for_job(session, job, "queued")
+        self._audit_for_job(session, job, "queued", reason_summary=reason_summary)
         return job
 
     @staticmethod
@@ -447,6 +461,7 @@ class KnowledgeAdminRepository:
         draft_id: str | None = None,
         job_id: str | None = None,
         release_build_id: str | None = None,
+        reason_summary: str | None = None,
         failure_summary: str | None = None,
     ) -> None:
         session.add(
@@ -468,6 +483,7 @@ class KnowledgeAdminRepository:
         job: KnowledgeJob,
         result: str,
         *,
+        reason_summary: str | None = None,
         failure_summary: str | None = None,
     ) -> None:
         self._audit(
@@ -479,5 +495,6 @@ class KnowledgeAdminRepository:
             draft_id=job.draft_id,
             job_id=job.id,
             release_build_id=job.release_build_id,
+            reason_summary=reason_summary,
             failure_summary=failure_summary,
         )

@@ -7,6 +7,10 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+import httpx
+from fastapi import UploadFile
+
+from metro_agent.auth.dependencies import CurrentUser
 from metro_agent.knowledge.chroma_client import get_chroma_client
 from metro_agent.knowledge.config import (
     KnowledgeSettings,
@@ -23,8 +27,212 @@ from metro_agent.knowledge_admin.models import KnowledgeJob
 from metro_agent.tools.knowledge_indexer import KnowledgeIndexer
 
 
+class KnowledgeAdminError(RuntimeError):
+    """Base class for app-facing governed knowledge administration failures."""
+
+
+class KnowledgeAdminNotFoundError(KnowledgeAdminError):
+    """A requested draft, job, or release does not exist."""
+
+
+class KnowledgeAdminInvalidStateError(KnowledgeAdminError):
+    """A request targets a draft or job in the wrong state."""
+
+
+class KnowledgeAdminMalformedRequestError(KnowledgeAdminError):
+    """The worker or repository returned malformed data."""
+
+
+class KnowledgeAdminWorkerUnavailableError(KnowledgeAdminError):
+    """The internal publisher worker could not complete the upload."""
+
+
 class KnowledgePublisherError(RuntimeError):
     """The controlled publisher cannot complete a job safely."""
+
+
+class KnowledgeAdminService:
+    def __init__(
+        self,
+        *,
+        repository: KnowledgeAdminRepository,
+        worker_base_url: str = "http://knowledge-publisher:8000",
+        internal_bearer_secret: str | None = None,
+        upload_timeout_seconds: float = 30.0,
+    ) -> None:
+        self.repository = repository
+        self.worker_base_url = worker_base_url.rstrip("/")
+        self.internal_bearer_secret = internal_bearer_secret or os.getenv(
+            "KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET"
+        )
+        self.upload_timeout_seconds = upload_timeout_seconds
+
+    async def upload_draft(
+        self, *, package: UploadFile, current_user: CurrentUser | None = None
+    ) -> dict[str, Any]:
+        if not self.internal_bearer_secret:
+            raise KnowledgeAdminWorkerUnavailableError(
+                "internal publisher secret is not configured"
+            )
+        try:
+            if hasattr(package.file, "seek"):
+                package.file.seek(0)
+            timeout = httpx.Timeout(
+                connect=self.upload_timeout_seconds,
+                read=self.upload_timeout_seconds,
+                write=self.upload_timeout_seconds,
+                pool=self.upload_timeout_seconds,
+            )
+            headers = {
+                "Authorization": f"Bearer {self.internal_bearer_secret}",
+            }
+            if current_user is not None:
+                headers.update(
+                    {
+                        "X-Knowledge-Actor-User-Id": str(current_user.id),
+                        "X-Knowledge-Actor-Username": current_user.username,
+                    }
+                )
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(
+                    f"{self.worker_base_url}/internal/drafts",
+                    headers=headers,
+                    files={
+                        "package": (
+                            package.filename or "knowledge.zip",
+                            package.file,
+                            "application/zip",
+                        )
+                    },
+                )
+        except httpx.TimeoutException as exc:
+            raise KnowledgeAdminWorkerUnavailableError("publisher worker timed out") from exc
+        except httpx.HTTPError as exc:
+            raise KnowledgeAdminWorkerUnavailableError("publisher worker unavailable") from exc
+        if response.status_code == 503:
+            raise KnowledgeAdminWorkerUnavailableError("publisher worker unavailable")
+        if response.status_code >= 400:
+            raise KnowledgeAdminMalformedRequestError("publisher worker rejected upload")
+        try:
+            payload = response.json()
+        except Exception as exc:  # pragma: no cover - defensive
+            raise KnowledgeAdminMalformedRequestError("publisher worker response is invalid") from exc
+        if not isinstance(payload, dict):
+            raise KnowledgeAdminMalformedRequestError("publisher worker response is invalid")
+        for field in ("draft_id", "job_id", "status"):
+            if not isinstance(payload.get(field), str) or not payload[field]:
+                raise KnowledgeAdminMalformedRequestError(
+                    "publisher worker response is invalid"
+                )
+        return payload
+
+    def list_drafts(self) -> list[Any]:
+        return self.repository.list_drafts()
+
+    def get_draft(self, draft_id: str) -> Any:
+        try:
+            return self.repository.get_draft(str(draft_id))
+        except ValueError as exc:
+            raise KnowledgeAdminNotFoundError(str(exc)) from exc
+
+    def queue_validation(self, draft_id: str, *, current_user: CurrentUser) -> Any:
+        return self._queue_job(
+            self.repository.queue_validation,
+            draft_id,
+            current_user=current_user,
+        )
+
+    def queue_publish(self, draft_id: str, *, current_user: CurrentUser) -> Any:
+        return self._queue_job(
+            self.repository.queue_publish,
+            draft_id,
+            current_user=current_user,
+        )
+
+    def list_releases(self) -> list[Any]:
+        return self.repository.list_releases()
+
+    def queue_rollback(
+        self, release_build_id: str, *, reason: str, current_user: CurrentUser
+    ) -> Any:
+        try:
+            return self.repository.queue_rollback(
+                release_build_id,
+                reason_summary=reason,
+                actor_user_id=str(current_user.id),
+                actor_username=current_user.username,
+            )
+        except ValueError as exc:
+            raise KnowledgeAdminNotFoundError(str(exc)) from exc
+
+    def get_job(self, job_id: str) -> Any:
+        try:
+            return self.repository.get_job(str(job_id))
+        except ValueError as exc:
+            raise KnowledgeAdminNotFoundError(str(exc)) from exc
+
+    def _queue_job(
+        self,
+        operation: Any,
+        draft_id: str,
+        *,
+        current_user: CurrentUser,
+    ) -> Any:
+        try:
+            return operation(
+                str(draft_id),
+                actor_user_id=str(current_user.id),
+                actor_username=current_user.username,
+            )
+        except ValueError as exc:
+            message = str(exc)
+            if message.startswith("Unknown knowledge"):
+                raise KnowledgeAdminNotFoundError(message) from exc
+            raise KnowledgeAdminInvalidStateError(message) from exc
+
+
+class _LazyKnowledgeAdminService:
+    """Delay DB-backed service construction until the first admin request."""
+
+    def __init__(self) -> None:
+        self._service: KnowledgeAdminService | None = None
+
+    def _resolve(self) -> KnowledgeAdminService:
+        if self._service is None:
+            self._service = KnowledgeAdminService(repository=build_default_repository())
+        return self._service
+
+    async def upload_draft(
+        self, *, package: UploadFile, current_user: CurrentUser | None = None
+    ) -> dict[str, Any]:
+        return await self._resolve().upload_draft(
+            package=package, current_user=current_user
+        )
+
+    def list_drafts(self) -> list[Any]:
+        return self._resolve().list_drafts()
+
+    def get_draft(self, draft_id: str) -> Any:
+        return self._resolve().get_draft(draft_id)
+
+    def queue_validation(self, draft_id: str, *, current_user: CurrentUser) -> Any:
+        return self._resolve().queue_validation(draft_id, current_user=current_user)
+
+    def queue_publish(self, draft_id: str, *, current_user: CurrentUser) -> Any:
+        return self._resolve().queue_publish(draft_id, current_user=current_user)
+
+    def list_releases(self) -> list[Any]:
+        return self._resolve().list_releases()
+
+    def queue_rollback(
+        self, release_build_id: str, *, reason: str, current_user: CurrentUser
+    ) -> Any:
+        return self._resolve().queue_rollback(
+            release_build_id, reason=reason, current_user=current_user
+        )
+
+    def get_job(self, job_id: str) -> Any:
+        return self._resolve().get_job(job_id)
 
 
 class KnowledgePublisherService:
@@ -52,12 +260,19 @@ class KnowledgePublisherService:
         self.publication_lock_key = publication_lock_key
 
     def ingest_draft(
-        self, package_path: Path, *, original_filename: str
+        self,
+        package_path: Path,
+        *,
+        original_filename: str,
+        actor_user_id: str | None = None,
+        actor_username: str | None = None,
     ) -> dict[str, str]:
         draft_id = uuid4().hex
         staged = stage_zip_knowledge_package(
             package_path, draft_id=draft_id, staging_root=self.staging_root
         )
+        resolved_actor_user_id = actor_user_id or self.internal_actor_user_id
+        resolved_actor_username = actor_username or self.internal_actor_username
         try:
             create_and_queue = getattr(
                 self.repository, "create_draft_and_queue_validation"
@@ -72,8 +287,8 @@ class KnowledgePublisherService:
                     package_sha256=staged.package_sha256,
                     package_size_bytes=staged.package_size_bytes,
                     storage_key=draft_id,
-                    actor_user_id=self.internal_actor_user_id,
-                    actor_username=self.internal_actor_username,
+                    actor_user_id=resolved_actor_user_id,
+                    actor_username=resolved_actor_username,
                 )
             else:
                 draft = self.repository.create_draft(
@@ -81,13 +296,13 @@ class KnowledgePublisherService:
                     package_sha256=staged.package_sha256,
                     package_size_bytes=staged.package_size_bytes,
                     storage_key=draft_id,
-                    actor_user_id=self.internal_actor_user_id,
-                    actor_username=self.internal_actor_username,
+                    actor_user_id=resolved_actor_user_id,
+                    actor_username=resolved_actor_username,
                 )
                 job = self.repository.queue_validation(
                     draft.id,
-                    actor_user_id=self.internal_actor_user_id,
-                    actor_username=self.internal_actor_username,
+                    actor_user_id=resolved_actor_user_id,
+                    actor_username=resolved_actor_username,
                 )
         except Exception:
             shutil.rmtree(staged.source_root, ignore_errors=True)
@@ -215,6 +430,10 @@ def build_default_repository() -> KnowledgeAdminRepository:
     from metro_agent.storage.history.database import SessionLocal
 
     return KnowledgeAdminRepository(SessionLocal)
+
+
+def build_default_knowledge_admin_service() -> KnowledgeAdminService:
+    return _LazyKnowledgeAdminService()
 
 
 def build_default_service() -> KnowledgePublisherService:

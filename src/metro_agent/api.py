@@ -33,6 +33,10 @@ from metro_agent.auth.router import (
 )
 from metro_agent.auth.rate_limit import LoginRateLimiter
 from metro_agent.auth.service import AuthService
+from metro_agent.knowledge_admin.router import create_knowledge_admin_router
+from metro_agent.knowledge_admin.service import (
+    build_default_knowledge_admin_service,
+)
 from metro_agent.readiness import KnowledgeReadinessChecker, check_default_readiness
 from metro_agent.knowledge.releases import ReleaseValidationError
 from metro_agent.knowledge_intent import requires_published_knowledge
@@ -174,6 +178,7 @@ def create_app(
     history_service_factory: Callable[[], Any] = build_default_history_service,
     monitoring_service_factory: Callable[[], Any] | None = None,
     auth_service_factory: Callable[[], Any] = build_default_auth_service,
+    knowledge_admin_service_factory: Callable[[], Any] = build_default_knowledge_admin_service,
     rate_limiter_factory: Callable[[], LoginRateLimiter] = LoginRateLimiter,
     chat_runner: Callable[..., str] = run_chat,
     readiness_checker: Callable[[], None] = check_default_readiness,
@@ -186,6 +191,7 @@ def create_app(
         app.state.graph = graph_factory()
         app.state.history_service = history_service_factory()
         app.state.auth_service = auth_service_factory()
+        app.state.knowledge_admin_service = knowledge_admin_service_factory()
         app.state.login_rate_limiter = login_rate_limiter
         app.state.monitoring_service_factory = (
             monitoring_service_factory or build_default_monitoring_service
@@ -205,6 +211,7 @@ def create_app(
             login_rate_limiter=login_rate_limiter,
         )
     )
+    app.include_router(create_knowledge_admin_router())
 
     @app.get("/")
     def page() -> FileResponse:

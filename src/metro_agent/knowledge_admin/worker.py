@@ -68,12 +68,24 @@ def create_app(
         request: Request,
         _auth: None = Depends(require_internal_bearer),
         package: UploadFile = File(...),
+        actor_user_id: str | None = Header(default=None, alias="X-Knowledge-Actor-User-Id"),
+        actor_username: str | None = Header(
+            default=None, alias="X-Knowledge-Actor-Username"
+        ),
     ) -> JSONResponse:
         publisher_service = publisher or request.app.state.publisher
+        if (actor_user_id is None) != (actor_username is None):
+            raise HTTPException(
+                status_code=422,
+                detail="Actor identity headers must be provided together",
+            )
         package_path = _persist_upload(package, publisher_service.staging_root)
         try:
             result = publisher_service.ingest_draft(
-                package_path, original_filename=package.filename or "knowledge.zip"
+                package_path,
+                original_filename=package.filename or "knowledge.zip",
+                actor_user_id=actor_user_id,
+                actor_username=actor_username,
             )
         finally:
             package_path.unlink(missing_ok=True)

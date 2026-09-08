@@ -265,6 +265,15 @@ def test_internal_draft_upload_requires_the_bearer_secret_and_queues_validation(
             headers={"Authorization": "Bearer publisher-secret"},
             files={"package": ("knowledge.zip", b"zip-bytes", "application/zip")},
         )
+        actor_accepted = client.post(
+            "/internal/drafts",
+            headers={
+                "Authorization": "Bearer publisher-secret",
+                "X-Knowledge-Actor-User-Id": "17",
+                "X-Knowledge-Actor-Username": "metro.admin",
+            },
+            files={"package": ("knowledge.zip", b"zip-bytes", "application/zip")},
+        )
         health = client.get("/internal/healthz")
 
         assert denied.status_code == 401
@@ -274,12 +283,21 @@ def test_internal_draft_upload_requires_the_bearer_secret_and_queues_validation(
             "job_id": "job-validate",
             "status": "queued",
         }
+        assert actor_accepted.status_code == 201
+        assert actor_accepted.json() == {
+            "draft_id": "draft-123",
+            "job_id": "job-validate",
+            "status": "queued",
+        }
         assert health.status_code == 200
         assert health.json() == {"status": "ok"}
-        assert len(stage_calls) == 1
+        assert len(stage_calls) == 2
         assert stage_calls[0][0].suffix == ".zip"
         assert stage_calls[0][1] == "draft-123"
         assert stage_calls[0][2] == temp_root / "staging"
+        assert stage_calls[1][0].suffix == ".zip"
+        assert stage_calls[1][1] == "draft-123"
+        assert stage_calls[1][2] == temp_root / "staging"
         assert repo.created_drafts == [
             {
                 "original_filename": "knowledge.zip",
@@ -288,14 +306,27 @@ def test_internal_draft_upload_requires_the_bearer_secret_and_queues_validation(
                 "storage_key": "draft-123",
                 "actor_user_id": "knowledge-publisher",
                 "actor_username": "knowledge-publisher",
-            }
+            },
+            {
+                "original_filename": "knowledge.zip",
+                "package_sha256": "a" * 64,
+                "package_size_bytes": 17,
+                "storage_key": "draft-123",
+                "actor_user_id": "17",
+                "actor_username": "metro.admin",
+            },
         ]
         assert repo.queued_jobs == [
             {
                 "draft_id": "draft-123",
                 "actor_user_id": "knowledge-publisher",
                 "actor_username": "knowledge-publisher",
-            }
+            },
+            {
+                "draft_id": "draft-123",
+                "actor_user_id": "17",
+                "actor_username": "metro.admin",
+            },
         ]
     finally:
         shutil.rmtree(temp_root, ignore_errors=True)

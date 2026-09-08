@@ -3,11 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class _PublicSchema(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
 
 
 class DraftListItem(_PublicSchema):
@@ -35,6 +35,7 @@ class JobStatus(_PublicSchema):
     queued_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+    lease_expires_at: datetime | None
 
 
 class ReleaseListItem(_PublicSchema):
@@ -49,3 +50,29 @@ class ReleaseDetail(ReleaseListItem):
     source_manifest_sha256: str
     draft_id: str
     validation_summary: dict[str, Any]
+
+
+class DraftSubmissionResult(_PublicSchema):
+    draft_id: str
+    job_id: str
+    status: str
+
+
+class _AdminMutationSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class EmptyAdminMutation(_AdminMutationSchema):
+    pass
+
+
+class RollbackRequest(_AdminMutationSchema):
+    reason: str = Field(min_length=1, max_length=500, strict=True)
+
+    @field_validator("reason")
+    @classmethod
+    def require_non_blank_reason(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("reason must not be blank")
+        return value
