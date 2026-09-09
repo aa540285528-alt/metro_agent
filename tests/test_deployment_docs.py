@@ -184,6 +184,8 @@ def test_read_only_deployment_verifier_and_caddy_template_define_https_contract(
         "docker compose --env-file",
         "config --quiet",
         "ps --format json",
+        "ConvertFrom-Json -AsHashtable",
+        '["services"]["app"]["ports"]',
         "POSTGRES_PASSWORD",
         "AUTH_MYSQL_PASSWORD",
         "MYSQL_ROOT_PASSWORD",
@@ -194,6 +196,7 @@ def test_read_only_deployment_verifier_and_caddy_template_define_https_contract(
         "APP_HOST_PORT",
     ):
         assert expected in verifier
+    assert "$config.services" not in verifier
     assert "$value" not in verifier
     assert not re.search(
         r"docker compose[^\r\n]*(?:\s)(?:up|down|start|stop|rm)\b",

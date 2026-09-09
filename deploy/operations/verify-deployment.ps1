@@ -61,17 +61,17 @@ $configJson = & docker compose --env-file $EnvFile --project-name $ProjectName c
 if ($LASTEXITCODE -ne 0) {
     throw "Docker Compose configuration rendering failed."
 }
-$config = $configJson | ConvertFrom-Json
-$ports = @($config.services.app.ports)
+$config = $configJson | ConvertFrom-Json -AsHashtable
+$ports = @($config["services"]["app"]["ports"])
 $expectedPort = "127.0.0.1:$hostPort:8000"
 $loopbackPort = $ports | Where-Object {
-    $_.host_ip -eq "127.0.0.1" -and [string]$_.published -eq [string]$hostPort -and $_.target -eq 8000
+    $_["host_ip"] -eq "127.0.0.1" -and [string]$_["published"] -eq [string]$hostPort -and $_["target"] -eq 8000
 }
 if ($loopbackPort.Count -ne 1 -or $ports.Count -ne 1) {
     throw "App port mapping does not match the required loopback contract: $expectedPort."
 }
 
-$healthcheck = [string]::Join(" ", @($config.services.app.healthcheck.test))
+$healthcheck = [string]::Join(" ", @($config["services"]["app"]["healthcheck"]["test"]))
 if ($healthcheck -notmatch "/api/health" -or $healthcheck -match "/api/ready") {
     throw "App healthcheck must use /api/health only."
 }
