@@ -57,6 +57,25 @@ def test_readiness_checks_both_databases_and_redis() -> None:
     assert redis_calls == ["PING"]
 
 
+def test_readiness_checks_knowledge_after_datastores() -> None:
+    calls: list[str] = []
+
+    class KnowledgeChecker:
+        def __call__(self) -> None:
+            calls.append("knowledge")
+
+    checker = DependencyReadinessChecker(
+        auth_engine=FakeEngine([]),
+        business_engine=FakeEngine([]),
+        redis_client=FakeRedis([]),
+        knowledge_checker=KnowledgeChecker(),
+    )
+
+    checker()
+
+    assert calls == ["knowledge"]
+
+
 @pytest.mark.parametrize("failing_dependency", ["auth", "business", "redis"])
 def test_readiness_propagates_each_dependency_failure(failing_dependency: str) -> None:
     failure = ConnectionError(f"{failing_dependency} unavailable")

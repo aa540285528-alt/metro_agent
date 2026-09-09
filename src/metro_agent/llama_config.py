@@ -1,15 +1,25 @@
-from llama_index.llms.deepseek import DeepSeek
-from llama_index.core import Settings
-from llama_index.postprocessor.sbert_rerank import SentenceTransformerRerank
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 import os
 from pathlib import Path
 
+from metro_agent.knowledge.config import KnowledgeSettings
 from metro_agent.storage_paths import configured_storage_path
 
 
 # LlamaIndex基础配置
 def init_llama_index_components():
+    from llama_index.core import Settings
+    if os.getenv("KNOWLEDGE_E2E") == "1":
+        from llama_index.core.embeddings import MockEmbedding
+        from llama_index.core.llms import MockLLM
+
+        Settings.llm = MockLLM()
+        Settings.embed_model = MockEmbedding(embed_dim=8)
+        return None
+
+    from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+    from llama_index.llms.deepseek import DeepSeek
+    from llama_index.postprocessor.sbert_rerank import SentenceTransformerRerank
+
     # 1. 设置 LLM
     Settings.llm = DeepSeek(
         model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
@@ -65,4 +75,4 @@ BASE_DIR = Path(__file__).resolve().parent
 CHROMA_DB_DIR = configured_storage_path("CHROMA_DB_DIR", BASE_DIR / "chroma_db")
 COLLECTION_NAME = "Metro_Knowledge_Obsidian_v1"
 INDEX_REGISTRY_COLLECTION_NAME = "Metro_Knowledge_Index_Registry_v1"
-KNOWLEDGE_PATH="d:/AIknowledge/wiki"
+KNOWLEDGE_PATH = KnowledgeSettings.from_environment().source_root

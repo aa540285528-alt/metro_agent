@@ -27,9 +27,12 @@ def owner_counts(path: Path) -> list[tuple[str, str, int]]:
 
 def main() -> int:
     if len(sys.argv) != 3:
-        print("usage: chroma-owner-counts.py LABEL DIRECTORY", file=sys.stderr)
+        print("usage: chroma-owner-counts.py memory DIRECTORY", file=sys.stderr)
         return 2
     label, directory = sys.argv[1:]
+    if label != "memory":
+        print("only the local memory Chroma store has per-user owner counts", file=sys.stderr)
+        return 2
     for collection, owner, count in owner_counts(Path(directory)):
         print(f"{label}\t{collection}\t{owner}\t{count}")
     return 0

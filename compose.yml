@@ -6,10 +6,10 @@ services:
       DATABASE_URL: "postgresql+psycopg://metro_agent:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/metro_agent"
       AUTH_DATABASE_URL: "mysql+pymysql://metro_auth:${AUTH_MYSQL_PASSWORD:?请在 .env 中设置 AUTH_MYSQL_PASSWORD}@mysql:3306/metro_auth?ssl_ca=/etc/mysql/ca/ca.pem&ssl_check_hostname=true"
       AUTH_SESSION_PEPPER: "${AUTH_SESSION_PEPPER:?请在 .env 中设置 AUTH_SESSION_PEPPER}"
+      KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET: "${KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET:?请在 .env 中设置 KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET}"
       AUTH_COOKIE_SECURE: "${AUTH_COOKIE_SECURE:-false}"
       AUTH_SESSION_TTL_SECONDS: "${AUTH_SESSION_TTL_SECONDS:-28800}"
       SHORT_TERM_MEMORY_REDIS_URL: redis://redis:6379
-      CHROMA_DB_DIR: /var/lib/metro-agent/chroma/current
       MEMORY_CHROMA_DB_DIR: /var/lib/metro-agent/memory-chroma/current
       EMBEDDING_MODEL_PATH: /models/bge-m3
       RERANK_MODEL_PATH: /models/bge-reranker
@@ -21,13 +21,19 @@ services:
       DASHSCOPE_API_KEY: "${DASHSCOPE_API_KEY:-}"
       DASHSCOPE_BASE_URL: "${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
       OLLAMA_BASE_URL: "${OLLAMA_BASE_URL:-http://host.docker.internal:11434}"
+      HTTP_PROXY: http://egress-gateway:3128
+      HTTPS_PROXY: http://egress-gateway:3128
+      http_proxy: http://egress-gateway:3128
+      https_proxy: http://egress-gateway:3128
+      NO_PROXY: localhost,127.0.0.1,mysql,postgres,redis,knowledge-read-proxy,wiremock
+      no_proxy: localhost,127.0.0.1,mysql,postgres,redis,knowledge-read-proxy,wiremock
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${APP_HOST_PORT:-8000}:8000"
     volumes:
       - mysql_ca:/etc/mysql/ca:ro
       - "${MODEL_DIR:?请在 .env 中设置 MODEL_DIR}:/models:ro"
-      - chroma_data:/var/lib/metro-agent/chroma
       - memory_chroma_data:/var/lib/metro-agent/memory-chroma
+    networks: [knowledge_frontend, app_backend, app_egress]
     depends_on:
       db-migrate:
         condition: service_completed_successfully
@@ -40,7 +46,7 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready', timeout=3)"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -56,6 +62,7 @@ services:
       postgres:
         condition: service_healthy
     restart: "no"
+    networks: [app_backend]
 
   auth-migrate:
     image: ${METRO_AGENT_IMAGE:-metro-agent:local}
@@ -68,6 +75,7 @@ services:
       mysql:
         condition: service_healthy
     restart: "no"
+    networks: [app_backend]
 
   postgres:
     image: postgres:16-alpine
@@ -83,6 +91,7 @@ services:
       timeout: 5s
       retries: 20
     restart: unless-stopped
+    networks: [app_backend]
 
   mysql-cert-init:
     image: mysql:8.4
@@ -110,6 +119,7 @@ services:
       - mysql_ca:/ca
       - mysql_server_certs:/server
     restart: "no"
+    networks: [app_backend]
 
   mysql:
     image: mysql:8.4
@@ -142,6 +152,7 @@ services:
       retries: 30
       start_period: 20s
     restart: unless-stopped
+    networks: [app_backend]
 
   redis:
     image: redis:8.4-alpine
@@ -156,6 +167,145 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+    networks: [app_backend, knowledge_backend]
+
+  chroma:
+    image: chromadb/chroma:1.5.9
+    volumes:
+      - knowledge_chroma_data:/chroma/chroma
+    networks: [knowledge_backend]
+    restart: unless-stopped
+
+  knowledge-read-proxy:
+    image: ${METRO_AGENT_IMAGE:-metro-agent:local}
+    command: ["uvicorn", "metro_agent.knowledge_read_proxy:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      KNOWLEDGE_ARTIFACT_ROOT: /var/lib/metro-agent/knowledge-artifacts
+    volumes:
+      - knowledge_artifact_data:/var/lib/metro-agent/knowledge-artifacts:ro
+    networks: [knowledge_frontend, knowledge_backend]
+    depends_on:
+      chroma:
+        condition: service_started
+    restart: unless-stopped
+
+  knowledge-publisher:
+    image: ${METRO_AGENT_IMAGE:-metro-agent:local}
+    command: ["uvicorn", "metro_agent.knowledge_admin.worker:app", "--host", "0.0.0.0", "--port", "8000"]
+    profiles: ["knowledge-admin"]
+    environment:
+      DATABASE_URL: "postgresql+psycopg://metro_agent:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/metro_agent"
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KNOWLEDGE_ARTIFACT_ROOT: /var/lib/metro-agent/knowledge-artifacts
+      KNOWLEDGE_UPLOAD_STAGING_ROOT: /var/lib/metro-agent/knowledge-upload-staging
+      KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET: "${KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET:?请在 .env 中设置 KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET}"
+    volumes:
+      - knowledge_artifact_data:/var/lib/metro-agent/knowledge-artifacts
+      - knowledge_upload_staging_data:/var/lib/metro-agent/knowledge-upload-staging
+    networks: [app_backend, knowledge_backend]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/internal/healthz', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    restart: unless-stopped
+
+  knowledge-indexer:
+    image: ${METRO_AGENT_IMAGE:-metro-agent:local}
+    command: ["python", "-m", "metro_agent.tools.knowledge_indexer", "status"]
+    profiles: ["knowledge-admin"]
+    environment:
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KNOWLEDGE_PATH: /knowledge/source
+      KNOWLEDGE_ARTIFACT_ROOT: /var/lib/metro-agent/knowledge-artifacts
+    volumes:
+      - ${KNOWLEDGE_SOURCE_DIR:?请在 .env 中设置 KNOWLEDGE_SOURCE_DIR}:/knowledge/source:ro
+      - knowledge_artifact_data:/var/lib/metro-agent/knowledge-artifacts
+    networks: [knowledge_backend]
+    depends_on:
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    restart: "no"
+
+  knowledge-backup:
+    image: ${METRO_AGENT_IMAGE:-metro-agent:local}
+    command:
+      - python
+      - -c
+      - "import sys; sys.stderr.write('Use deploy/operations/backup-all.sh for a governed backup.\\n'); raise SystemExit(64)"
+    profiles: ["knowledge-backup"]
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    volumes:
+      - knowledge_chroma_data:/chroma:ro
+      - knowledge_artifact_data:/var/lib/metro-agent/knowledge-artifacts:ro
+    networks: [knowledge_backend]
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: "no"
+
+  knowledge-e2e:
+    image: ${METRO_AGENT_IMAGE:-metro-agent:local}
+    command: ["python", "-m", "metro_agent.tools.knowledge_indexer", "build-and-publish"]
+    profiles: ["knowledge-e2e"]
+    environment:
+      CHROMA_HOST: chroma
+      CHROMA_PORT: "8000"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      KNOWLEDGE_PATH: /knowledge/source
+      KNOWLEDGE_ARTIFACT_ROOT: /var/lib/metro-agent/knowledge-artifacts
+      KNOWLEDGE_E2E: "1"
+      KNOWLEDGE_EMBEDDER: deterministic-test-embedder
+      METRO_AGENT_ENV: development
+    volumes:
+      - ./fixtures/knowledge-e2e:/knowledge/source:ro
+      - knowledge_artifact_data:/var/lib/metro-agent/knowledge-artifacts
+    networks: [knowledge_backend]
+    depends_on:
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    restart: "no"
+
+  # The only service with a non-internal network.  Squid's versioned allowlist
+  # is mounted read-only; app has no route to the Internet except this proxy.
+  egress-gateway:
+    image: ubuntu/squid:6.6-24.04_beta
+    command: ["squid", "-N", "-f", "/etc/squid/squid.conf"]
+    read_only: true
+    tmpfs:
+      - /run
+      - /var/log/squid:uid=13,gid=13,mode=0755
+      - /var/spool/squid:uid=13,gid=13,mode=0755
+    volumes:
+      - ./deploy/egress/squid.conf:/etc/squid/squid.conf:ro
+      - ./deploy/egress/allowed-domains.txt:/etc/squid/allowed-domains.txt:ro
+    networks: [app_egress, controlled_egress]
+    restart: unless-stopped
 
   wiremock:
     image: wiremock/wiremock:3.13.2
@@ -164,12 +314,27 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - ./deploy/wiremock/mappings:/home/wiremock/mappings:ro
+    networks: [app_backend]
 
 volumes:
   postgres_data:
   mysql_data:
   mysql_ca:
   mysql_server_certs:
-  chroma_data:
   memory_chroma_data:
   redis_data:
+  knowledge_chroma_data:
+  knowledge_artifact_data:
+  knowledge_upload_staging_data:
+
+networks:
+  app_backend:
+    internal: true
+  knowledge_frontend:
+    internal: true
+  knowledge_backend:
+    internal: true
+  app_egress:
+    internal: true
+  controlled_egress:
+    internal: false

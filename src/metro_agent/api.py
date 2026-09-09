@@ -33,8 +33,15 @@ from metro_agent.auth.router import (
 )
 from metro_agent.auth.rate_limit import LoginRateLimiter
 from metro_agent.auth.service import AuthService
-from metro_agent.readiness import check_default_readiness
+from metro_agent.knowledge_admin.router import create_knowledge_admin_router
+from metro_agent.knowledge_admin.service import (
+    build_default_knowledge_admin_service,
+)
+from metro_agent.readiness import KnowledgeReadinessChecker, check_default_readiness
+from metro_agent.knowledge.releases import ReleaseValidationError
+from metro_agent.knowledge_intent import requires_published_knowledge
 from metro_agent.storage.history.service import ConversationNotFound
+from metro_agent.tools.knowledge_index_registry import KnowledgeIndexUnavailableError
 from metro_agent.observability.query_service import (
     MonitoringFilter,
     MonitoringQueryService,
@@ -171,9 +178,11 @@ def create_app(
     history_service_factory: Callable[[], Any] = build_default_history_service,
     monitoring_service_factory: Callable[[], Any] | None = None,
     auth_service_factory: Callable[[], Any] = build_default_auth_service,
+    knowledge_admin_service_factory: Callable[[], Any] = build_default_knowledge_admin_service,
     rate_limiter_factory: Callable[[], LoginRateLimiter] = LoginRateLimiter,
     chat_runner: Callable[..., str] = run_chat,
     readiness_checker: Callable[[], None] = check_default_readiness,
+    knowledge_preflight: Callable[[], None] = KnowledgeReadinessChecker(),
 ) -> FastAPI:
     login_rate_limiter = rate_limiter_factory()
 
@@ -182,6 +191,7 @@ def create_app(
         app.state.graph = graph_factory()
         app.state.history_service = history_service_factory()
         app.state.auth_service = auth_service_factory()
+        app.state.knowledge_admin_service = knowledge_admin_service_factory()
         app.state.login_rate_limiter = login_rate_limiter
         app.state.monitoring_service_factory = (
             monitoring_service_factory or build_default_monitoring_service
@@ -201,6 +211,7 @@ def create_app(
             login_rate_limiter=login_rate_limiter,
         )
     )
+    app.include_router(create_knowledge_admin_router())
 
     @app.get("/")
     def page() -> FileResponse:
@@ -370,6 +381,27 @@ def create_app(
         _raw_session_token: Annotated[str | None, Depends(get_session_token)],
     ) -> StreamingResponse:
         owner_subject = auth_owner_subject(current_user.id)
+        if requires_published_knowledge(payload.message):
+            try:
+                knowledge_preflight()
+            except (KnowledgeIndexUnavailableError, ReleaseValidationError) as exc:
+                logger.warning(
+                    "operation=knowledge_preflight error_type=%s",
+                    type(exc).__name__,
+                )
+
+                def unavailable_events() -> Generator[str, None, None]:
+                    yield encode_sse(
+                        "error",
+                        {"message": "已发布知识库暂不可用，请稍后重试"},
+                    )
+                    yield encode_sse("done", {})
+
+                return StreamingResponse(
+                    unavailable_events(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
         try:
             request.app.state.history_service.claim_thread(
                 payload.thread_id,
@@ -405,6 +437,15 @@ def create_app(
                     ),
                     user_id=owner_subject,
                     message=payload.message,
+                )
+            except KnowledgeIndexUnavailableError as exc:
+                logger.warning(
+                    "operation=run_chat error_type=%s",
+                    type(exc).__name__,
+                )
+                yield encode_sse(
+                    "error",
+                    {"message": "已发布知识库暂不可用，请稍后重试"},
                 )
             except AgentRunError:
                 logger.warning("Agent chat did not produce a usable answer")

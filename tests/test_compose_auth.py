@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import yaml
@@ -63,7 +64,7 @@ def test_compose_injects_auth_configuration_and_limits_public_ports() -> None:
     app = services["app"]
     environment = app["environment"]
 
-    assert app["ports"] == ["127.0.0.1:8000:8000"]
+    assert app["ports"] == ["127.0.0.1:${APP_HOST_PORT:-8000}:8000"]
     assert "postgres:5432/metro_agent" in environment["DATABASE_URL"]
     assert "mysql:3306/metro_auth" in environment["AUTH_DATABASE_URL"]
     assert environment["SHORT_TERM_MEMORY_REDIS_URL"] == "redis://redis:6379"
@@ -81,11 +82,24 @@ def test_compose_injects_auth_configuration_and_limits_public_ports() -> None:
         "OLLAMA_BASE_URL",
     ):
         assert provider_variable in environment
-    assert "api/ready" in " ".join(app["healthcheck"]["test"])
+    healthcheck = " ".join(app["healthcheck"]["test"])
+    assert "api/health" in healthcheck
+    assert "api/ready" not in healthcheck
     assert app["restart"] == "unless-stopped"
 
     assert services["wiremock"]["profiles"] == ["mock"]
     assert set(services["mysql"]["depends_on"]) == {"mysql-cert-init"}
+    for service_name in (
+        "mysql",
+        "postgres",
+        "redis",
+        "chroma",
+        "knowledge-publisher",
+        "knowledge-read-proxy",
+        "knowledge-indexer",
+        "knowledge-backup",
+    ):
+        assert "ports" not in services[service_name]
 
 
 def test_compose_requires_database_passwords_and_session_pepper() -> None:
@@ -170,19 +184,16 @@ def test_redis_includes_search_capability_required_by_checkpointer() -> None:
     assert "COMMAND INFO FT.INFO" in healthcheck
 
 
-def test_compose_persists_redis_and_both_chroma_stores_for_recovery() -> None:
+def test_compose_persists_redis_memory_and_governed_knowledge_stores_for_recovery() -> None:
     compose = _compose()
     services = compose["services"]
     app = services["app"]
     redis = services["redis"]
 
-    assert app["environment"]["CHROMA_DB_DIR"] == (
-        "/var/lib/metro-agent/chroma/current"
-    )
     assert app["environment"]["MEMORY_CHROMA_DB_DIR"] == (
         "/var/lib/metro-agent/memory-chroma/current"
     )
-    assert "chroma_data:/var/lib/metro-agent/chroma" in app["volumes"]
+    assert "CHROMA_DB_DIR" not in app["environment"]
     assert (
         "memory_chroma_data:/var/lib/metro-agent/memory-chroma"
         in app["volumes"]
@@ -190,7 +201,147 @@ def test_compose_persists_redis_and_both_chroma_stores_for_recovery() -> None:
     assert "redis_data:/data" in redis["volumes"]
     assert "appendonly" in " ".join(redis["command"]).lower()
     assert set(compose["volumes"]) >= {
-        "chroma_data",
         "memory_chroma_data",
         "redis_data",
+        "knowledge_chroma_data",
+        "knowledge_artifact_data",
     }
+
+
+def test_compose_isolates_published_knowledge_from_the_application() -> None:
+    compose = _compose()
+    services = compose["services"]
+
+    assert services["chroma"]["image"] == "chromadb/chroma:1.5.9"
+    assert "ports" not in services["chroma"]
+    assert services["chroma"]["networks"] == ["knowledge_backend"]
+    assert services["knowledge-read-proxy"]["networks"] == [
+        "knowledge_frontend",
+        "knowledge_backend",
+    ]
+    assert services["knowledge-read-proxy"]["command"][:2] == [
+        "uvicorn",
+        "metro_agent.knowledge_read_proxy:app",
+    ]
+    assert any(value.endswith(":ro") for value in services["knowledge-read-proxy"]["volumes"])
+    assert services["app"]["networks"] == [
+        "knowledge_frontend",
+        "app_backend",
+        "app_egress",
+    ]
+    assert "knowledge_backend" not in services["app"]["networks"]
+    assert "controlled_egress" not in services["app"]["networks"]
+    assert "KNOWLEDGE_READ_PROXY_URL" not in services["app"]["environment"]
+    assert services["app"]["environment"]["HTTPS_PROXY"] == (
+        "http://egress-gateway:3128"
+    )
+    assert services["app"]["environment"]["NO_PROXY"].split(",") == [
+        "localhost",
+        "127.0.0.1",
+        "mysql",
+        "postgres",
+        "redis",
+        "knowledge-read-proxy",
+        "wiremock",
+    ]
+    gateway = services["egress-gateway"]
+    assert gateway["image"] == "ubuntu/squid:6.6-24.04_beta"
+    assert gateway["networks"] == ["app_egress", "controlled_egress"]
+    assert gateway["read_only"] is True
+    assert "/var/log/squid:uid=13,gid=13,mode=0755" in gateway["tmpfs"]
+    assert "/var/spool/squid:uid=13,gid=13,mode=0755" in gateway["tmpfs"]
+    assert compose["networks"]["app_egress"] == {"internal": True}
+    assert compose["networks"]["controlled_egress"] == {"internal": False}
+    assert {
+        service_name
+        for service_name, service in services.items()
+        if "controlled_egress" in service.get("networks", [])
+    } == {"egress-gateway"}
+    allowlist = (ROOT / "deploy" / "egress" / "allowed-domains.txt").read_text(
+        encoding="utf-8"
+    )
+    squid_config = (ROOT / "deploy" / "egress" / "squid.conf").read_text(
+        encoding="utf-8"
+    )
+    assert "api.deepseek.com" in allowlist
+    assert "dashscope.aliyuncs.com" in allowlist
+    assert 'dstdomain "/etc/squid/allowed-domains.txt"' in squid_config
+    assert "http_access allow allowed_model_destinations" in squid_config
+    assert "http_access deny all" in squid_config
+    assert "access_log stdio:/var/log/squid/access.log" in squid_config
+    assert "cache_log /var/log/squid/cache.log" in squid_config
+    for network in (
+        "app_backend",
+        "knowledge_frontend",
+        "knowledge_backend",
+        "app_egress",
+    ):
+        assert compose["networks"][network]["internal"] is True
+
+
+def test_compose_runs_knowledge_indexer_only_as_an_admin_profile() -> None:
+    compose = _compose()
+    indexer = compose["services"]["knowledge-indexer"]
+
+    assert indexer["profiles"] == ["knowledge-admin"]
+    assert indexer["networks"] == ["knowledge_backend"]
+    assert any(value.endswith(":ro") for value in indexer["volumes"])
+    assert any(not value.endswith(":ro") for value in indexer["volumes"])
+
+
+def test_compose_keeps_backup_out_of_admin_startup() -> None:
+    backup = _compose()["services"]["knowledge-backup"]
+
+    assert backup["profiles"] == ["knowledge-backup"]
+    assert backup["restart"] == "no"
+    assert backup["volumes"] == [
+        "knowledge_chroma_data:/chroma:ro",
+        "knowledge_artifact_data:/var/lib/metro-agent/knowledge-artifacts:ro",
+    ]
+    command = " ".join(backup["command"])
+    assert "backup-all.sh" in command
+    assert "SystemExit(64)" in command
+
+
+def test_knowledge_admin_wrappers_only_accept_governed_commands() -> None:
+    shell = (ROOT / "deploy" / "operations" / "knowledge-admin.sh").read_text(
+        encoding="utf-8"
+    )
+    powershell = (ROOT / "deploy" / "operations" / "knowledge-admin.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    for command in ("build-and-publish", "rollback", "verify", "status"):
+        assert command in shell
+        assert command in powershell
+    assert "id -un" in shell
+    assert "$principal.Identity.Name" in powershell
+    assert "id -u" in shell
+    assert "WindowsPrincipal" in powershell
+
+
+def test_knowledge_indexer_compose_runs_keep_the_module_entrypoint() -> None:
+    """`docker compose run SERVICE args` replaces the service command.
+
+    A governed subcommand therefore has to follow the Python module entrypoint,
+    rather than be passed as the first positional argument after the service.
+    """
+    operation_scripts = {
+        "knowledge-admin.sh": (ROOT / "deploy" / "operations" / "knowledge-admin.sh").read_text(
+            encoding="utf-8"
+        ),
+        "knowledge-admin.ps1": (
+            ROOT / "deploy" / "operations" / "knowledge-admin.ps1"
+        ).read_text(encoding="utf-8"),
+        "restore-all.sh": (ROOT / "deploy" / "operations" / "restore-all.sh").read_text(
+            encoding="utf-8"
+        ),
+    }
+
+    for script_name, script in operation_scripts.items():
+        assert "metro_agent.tools.knowledge_indexer" in script, script_name
+        assert not re.search(
+            r"knowledge-indexer(?:\s+\\)?\s*(?:\r?\n\s*)?"
+            r"(?:build-and-publish|rollback|verify|status)\b",
+            script,
+        ), script_name

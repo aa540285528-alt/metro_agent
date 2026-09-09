@@ -1,5 +1,7 @@
 """Persistent pointer to the fully built knowledge index collection."""
 
+from metro_agent.knowledge.releases import read_release_pointer
+
 PUBLISHED_INDEX_ID = "published"
 
 
@@ -8,6 +10,12 @@ class KnowledgeIndexUnavailableError(RuntimeError):
 
 
 def read_published_collection_name(client, registry_name: str) -> str:
+    # New publications use a descriptor-bound, atomic pointer.  Retain the
+    # legacy record shape only so historical registries remain readable until
+    # they are replaced by their next governed publication.
+    pointer = read_release_pointer(client, required=False)
+    if pointer is not None:
+        return pointer.current_collection_name
     try:
         registry = client.get_collection(registry_name)
     except Exception as exc:
@@ -27,16 +35,14 @@ def read_published_collection_name(client, registry_name: str) -> str:
 
 
 def publish_collection_name(client, registry_name: str, collection_name: str) -> None:
-    registry = client.get_or_create_collection(registry_name)
-    registry.upsert(
-        ids=[PUBLISHED_INDEX_ID],
-        documents=["published index"],
-        embeddings=[[0.0]],
-        metadatas=[{"collection_name": collection_name, "status": "ready"}],
+    """Reject obsolete direct publication without touching the registry."""
+    raise KnowledgeIndexUnavailableError(
+        "direct publication is disabled; use the governed knowledge_indexer CLI"
     )
 
 
 def clear_published_collection_name(client, registry_name: str) -> None:
-    """Remove the published pointer when a failed first publication is rolled back."""
-    registry = client.get_collection(registry_name)
-    registry.delete(ids=[PUBLISHED_INDEX_ID])
+    """Reject obsolete direct pointer deletion without touching the registry."""
+    raise KnowledgeIndexUnavailableError(
+        "direct pointer deletion is disabled; use the governed knowledge_indexer CLI"
+    )

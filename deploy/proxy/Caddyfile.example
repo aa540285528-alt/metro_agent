@@ -1,0 +1,12 @@
+# Run Caddy on the deployment host with PILOT_FQDN and APP_HOST_PORT set from
+# the same authority as the pilot .env file. The Metro Agent app stays loopback-only.
+{$PILOT_FQDN} {
+    encode zstd gzip
+
+    reverse_proxy 127.0.0.1:{$APP_HOST_PORT:8000} {
+        header_up Host {host}
+        header_up X-Forwarded-Host {host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-For {remote_host}
+    }
+}

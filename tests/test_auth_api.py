@@ -29,6 +29,7 @@ from metro_agent.auth.models import AuthBase
 from metro_agent.auth.router import get_auth_cookie_secure
 from metro_agent.auth.service import AuthService
 from metro_agent.storage.history.service import ConversationNotFound
+from metro_agent.tools.knowledge_index_registry import KnowledgeIndexUnavailableError
 
 
 class StubAuthService:
@@ -221,6 +222,7 @@ def auth_api(monkeypatch: pytest.MonkeyPatch):
         monitoring_service_factory=lambda: FakeMonitoringService(),
         auth_service_factory=lambda: auth_service,
         chat_runner=runner,
+        knowledge_preflight=lambda: None,
     )
     with TestClient(app) as client:
         yield SimpleNamespace(
@@ -544,6 +546,84 @@ def test_only_claim_winner_enters_runner_when_new_thread_competes(auth_api) -> N
     finally:
         first.close()
         second.close()
+
+
+def test_stream_returns_precise_message_when_published_knowledge_is_unavailable(
+    auth_api,
+) -> None:
+    assert login(auth_api.client, "operator", "CorrectHorseBattery2").status_code == 200
+
+    def unavailable_knowledge(*_args, **_kwargs):
+        raise KnowledgeIndexUnavailableError("read proxy rejected current collection")
+
+    auth_api.app.state.graph = object()
+    response_app = create_app(
+        graph_factory=lambda: object(),
+        history_service_factory=lambda: auth_api.history,
+        monitoring_service_factory=lambda: FakeMonitoringService(),
+        auth_service_factory=lambda: auth_api.service,
+        chat_runner=auth_api.runner,
+        knowledge_preflight=unavailable_knowledge,
+    )
+    with TestClient(response_app) as client:
+        assert login(client, "operator", "CorrectHorseBattery2").status_code == 200
+        response = client.post(
+            "/api/chat/stream", json={"thread_id": "knowledge-down", "message": "查询规程"}
+        )
+
+    assert response.status_code == 200
+    assert "event: error" in response.text
+    assert "已发布知识库暂不可用，请稍后重试" in response.text
+    assert "event: final" not in response.text
+    assert auth_api.history.conversations == {}
+    assert auth_api.history.claim_calls == []
+    assert auth_api.history.recorded_owners == []
+    assert auth_api.runner.calls == []
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "你好，介绍一下你自己",
+        "你记得我有哪些偏好？",
+        "设备登录密码是多少？",
+        "传输链路故障怎么排查？",
+    ],
+)
+def test_stream_skips_knowledge_preflight_for_routes_that_cannot_run_knowledge_agent(
+    auth_api,
+    message: str,
+) -> None:
+    assert login(auth_api.client, "operator", "CorrectHorseBattery2").status_code == 200
+    preflight_calls = 0
+
+    def unavailable_knowledge() -> None:
+        nonlocal preflight_calls
+        preflight_calls += 1
+        raise KnowledgeIndexUnavailableError("read proxy rejected current collection")
+
+    response_app = create_app(
+        graph_factory=lambda: object(),
+        history_service_factory=lambda: auth_api.history,
+        monitoring_service_factory=lambda: FakeMonitoringService(),
+        auth_service_factory=lambda: auth_api.service,
+        chat_runner=auth_api.runner,
+        knowledge_preflight=unavailable_knowledge,
+    )
+    with TestClient(response_app) as client:
+        assert login(client, "operator", "CorrectHorseBattery2").status_code == 200
+        response = client.post(
+            "/api/chat/stream",
+            json={"thread_id": f"non-knowledge-{preflight_calls}-{len(message)}", "message": message},
+        )
+
+    assert response.status_code == 200
+    assert "event: final" in response.text
+    assert "已发布知识库暂不可用，请稍后重试" not in response.text
+    assert preflight_calls == 0
+    assert len(auth_api.runner.calls) == 1
+    assert len(auth_api.history.claim_calls) == 1
+    assert len(auth_api.history.recorded_owners) == 1
 
 
 def test_stream_rechecks_session_before_calling_runner(
@@ -931,6 +1011,36 @@ def test_liveness_does_not_depend_on_readiness(auth_api) -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_first_knowledge_publication_has_liveness_before_strict_readiness(
+    auth_api,
+) -> None:
+    published = False
+
+    def readiness() -> None:
+        if not published:
+            raise ConnectionError("published release pointer is unavailable")
+
+    def build_app():
+        return create_app(
+            graph_factory=lambda: object(),
+            history_service_factory=lambda: auth_api.history,
+            monitoring_service_factory=lambda: FakeMonitoringService(),
+            auth_service_factory=lambda: auth_api.service,
+            readiness_checker=readiness,
+            chat_runner=auth_api.runner,
+        )
+
+    with TestClient(build_app(), raise_server_exceptions=False) as client:
+        assert client.get("/api/health").status_code == 200
+        assert client.get("/api/ready").status_code == 503
+        published = True
+        assert client.get("/api/ready").status_code == 200
+
+    with TestClient(build_app(), raise_server_exceptions=False) as restarted_client:
+        assert restarted_client.get("/api/health").status_code == 200
+        assert restarted_client.get("/api/ready").status_code == 200
+
+
 def test_readiness_returns_ok_when_all_dependencies_are_available(auth_api) -> None:
     calls = 0
 
@@ -955,7 +1065,9 @@ def test_readiness_returns_ok_when_all_dependencies_are_available(auth_api) -> N
     assert calls == 1
 
 
-@pytest.mark.parametrize("dependency", ["auth mysql", "business postgres", "redis"])
+@pytest.mark.parametrize(
+    "dependency", ["auth mysql", "business postgres", "redis", "knowledge published"]
+)
 def test_readiness_dependency_failure_is_503_without_dsn(
     auth_api, dependency: str
 ) -> None:

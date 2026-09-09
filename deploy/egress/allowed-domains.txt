@@ -1,0 +1,4 @@
+# 版本化出口允许列表；新增域名必须经部署变更审查。
+api.deepseek.com
+dashscope.aliyuncs.com
+open.bigmodel.cn

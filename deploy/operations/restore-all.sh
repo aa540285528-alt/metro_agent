@@ -6,7 +6,7 @@ case "$BACKUP_DIR" in
   /*) ;;
   *) echo "备份目录必须是绝对路径" >&2; exit 2 ;;
 esac
-for required in metro_auth.sql metro_agent.dump chroma.tar.gz memory-chroma.tar.gz redis-dump.rdb SHA256SUMS alembic-current-postgres.txt alembic-current-mysql.txt metro-agent-image.txt owner-counts-before.txt; do
+for required in metro_auth.sql metro_agent.dump memory-chroma.tar.gz knowledge-chroma.tar.gz knowledge-artifacts.tar.gz redis-dump.rdb SHA256SUMS alembic-current-postgres.txt alembic-current-mysql.txt metro-agent-image.txt owner-counts-before.txt; do
   test -s "$BACKUP_DIR/$required" || { echo "缺少备份文件: $required" >&2; exit 2; }
 done
 (cd "$BACKUP_DIR" && sha256sum -c SHA256SUMS)
@@ -19,7 +19,7 @@ if test "$(printf '%s' "$METRO_AGENT_IMAGE" | wc -l)" -ne 0 || \
 fi
 export METRO_AGENT_IMAGE
 
-docker compose stop app
+docker compose stop app knowledge-read-proxy chroma
 docker compose up -d --wait mysql postgres
 
 echo RESTORE_STEP=MySQL
@@ -39,10 +39,15 @@ docker compose exec -T postgres \
   < "$BACKUP_DIR/metro_agent.dump"
 
 echo RESTORE_STEP=Chroma
-docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup:ro" app python -c \
-  "import os,shutil,tarfile; root='/var/lib/metro-agent/chroma'; unpack=root+'/restore.unpack'; old=root+'/rollback.previous'; shutil.rmtree(unpack,ignore_errors=True); shutil.rmtree(old,ignore_errors=True); os.makedirs(unpack); a=tarfile.open('/backup/chroma.tar.gz'); a.extractall(unpack,filter='data'); a.close(); os.replace(root+'/current',old) if os.path.exists(root+'/current') else None; os.replace(unpack+'/current',root+'/current'); shutil.rmtree(unpack,ignore_errors=True)"
-docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup:ro" app python -c \
-  "import os,shutil,tarfile; root='/var/lib/metro-agent/memory-chroma'; unpack=root+'/restore.unpack'; old=root+'/rollback.previous'; shutil.rmtree(unpack,ignore_errors=True); shutil.rmtree(old,ignore_errors=True); os.makedirs(unpack); a=tarfile.open('/backup/memory-chroma.tar.gz'); a.extractall(unpack,filter='data'); a.close(); os.replace(root+'/current',old) if os.path.exists(root+'/current') else None; os.replace(unpack+'/current',root+'/current'); shutil.rmtree(unpack,ignore_errors=True)"
+docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup:ro" app \
+  python deploy/operations/safe-restore-tar.py swap-volume /backup/memory-chroma.tar.gz /var/lib/metro-agent/memory-chroma --expected-root current
+# The full knowledge volume is staged and switched only after every tar member
+# has been inspected.  It is never extracted over the live Chroma root.
+docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup:ro" -v knowledge_chroma_data:/restore app \
+  python deploy/operations/safe-restore-tar.py replace-volume-contents /backup/knowledge-chroma.tar.gz /restore --expected-root chroma
+# Artifacts are append-only evidence.  Extraction never clears existing releases.
+docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup:ro" knowledge-indexer sh -ceu \
+  'python deploy/operations/safe-restore-tar.py merge-artifacts /backup/knowledge-artifacts.tar.gz /var/lib/metro-agent --expected-root knowledge-artifacts'
 
 echo RESTORE_STEP=Redis
 docker compose stop redis
@@ -65,13 +70,25 @@ docker compose exec -T postgres psql -X -U metro_agent -d metro_agent -At -F '|'
   -c "SELECT 'postgres.agent_traces', user_id, count(*) FROM agent_traces GROUP BY user_id ORDER BY user_id" \
   >> "$BACKUP_DIR/owner-counts-after.txt"
 docker compose run --rm --no-deps app python deploy/operations/chroma-owner-counts.py \
-  knowledge /var/lib/metro-agent/chroma/current \
-  >> "$BACKUP_DIR/owner-counts-after.txt"
-docker compose run --rm --no-deps app python deploy/operations/chroma-owner-counts.py \
   memory /var/lib/metro-agent/memory-chroma/current \
   >> "$BACKUP_DIR/owner-counts-after.txt"
 cmp "$BACKUP_DIR/owner-counts-before.txt" "$BACKUP_DIR/owner-counts-after.txt"
 
+docker compose up -d --wait chroma redis
+verify-restored-release() {
+  docker compose --profile knowledge-admin run --rm --no-deps knowledge-indexer \
+    python -m metro_agent.tools.knowledge_indexer verify
+}
+verify-restored-release
+
+docker compose up -d --wait knowledge-read-proxy
+attempt=0
+until docker compose exec -T knowledge-read-proxy python -c \
+  "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v2/heartbeat',timeout=3)"; do
+  attempt=$((attempt + 1))
+  test "$attempt" -lt 30 || { echo "knowledge-read-proxy 未就绪" >&2; exit 5; }
+  sleep 2
+done
 docker compose up -d --no-build app
 attempt=0
 until docker compose exec -T app python -c \

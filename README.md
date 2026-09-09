@@ -8,44 +8,33 @@ Metro Agent 是面向地铁通信运维场景的多 Agent 助手。本仓库包�
 
 真实 Agent 验收中，路径和安全指标已达到当前门槛，但语义指标仍未通过：`answer_relevance=0.8635`、`answer_accuracy=0.7235`，两者都低于 `0.9`。因此当前版本**不算模型质量验收通过**，不得在验收报告中改写成“模型质量已达标”。
 
-## 快速部署
+## 可复制的内部试点部署
 
-前置条件：Docker Engine、Docker Compose v2，以及只允许本机或受控反向代理访问的服务器。
+前置条件：Docker Engine、Docker Compose v2、Caddy，以及仅向受控内部网络开放 HTTPS 的服务器。部署配置的唯一权威来源是部署目录中的一个 `.env`，例如 `D:\MetroAgent\pilot\.env`；不要使用源码根目录、worktree 或其他环境的 `.env`。不要让同一个 Compose 项目名的数据卷与另一组数据库密码组合复用。
 
-1. 创建本地配置，不要提交 `.env`：
+1. 从 `.env.example` 创建该唯一配置文件，不要提交它。为 `POSTGRES_PASSWORD`、`AUTH_MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD` 分别生成独立的 URL 安全高熵值；为 `AUTH_SESSION_PEPPER` 生成至少 32 字节随机值。`MODEL_DIR` 必须指向含 `bge-m3/`、`bge-reranker/` 的宿主机模型目录；`KNOWLEDGE_SOURCE_DIR` 仅供受控 indexer 使用；`KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET` 只用于 app 与 publisher 的内部认证。`APP_HOST_PORT` 是 app 的 loopback HTTP 端口，默认 `8000`；`COMPOSE_PROJECT_NAME` 固定为 `metro-agent-pilot`。所有这些值都不得输出到日志或验收记录。
 
-   ```bash
-   cp .env.example .env
+2. 在 PowerShell 中使用同一 env 文件渲染、启动并验证。命令显式指定 env 文件与项目名，避免 Compose 在当前目录猜测配置来源：
+
+   ```powershell
+   $envFile = "D:\MetroAgent\pilot\.env"
+   docker compose --env-file $envFile --project-name metro-agent-pilot config --quiet
+   docker compose --env-file $envFile --project-name metro-agent-pilot --profile knowledge-admin up --build -d
+   docker compose --env-file $envFile --project-name metro-agent-pilot ps -a
+   pwsh -File deploy/operations/verify-deployment.ps1 -EnvFile $envFile -ProjectName metro-agent-pilot
    ```
 
-2. 为 `POSTGRES_PASSWORD`、`AUTH_MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD` 分别生成独立的 URL 安全高熵值；为 `AUTH_SESSION_PEPPER` 生成至少 32 字节随机值。例如每次单独执行：
+   `db-migrate` 和 `auth-migrate` 必须以退出码 `0` 结束。`/api/health` 只表示 app 进程存活，因此 Compose 使用它作为容器 healthcheck；`/api/ready` 严格表示已有非空的已发布知识版本可查询。首次发布前，登录、管理员上传和发布可用，但 `/api/ready` 应返回 `503`，不得被描述成可接收知识问答流量。
 
-   ```bash
-   python -c "import secrets; print(secrets.token_hex(24))"
-   python -c "import secrets; print(secrets.token_hex(32))"
+3. 首次且仅首次，以同一部署配置创建管理员：
+
+   ```powershell
+   docker compose --env-file $envFile --project-name metro-agent-pilot run --rm app python -m metro_agent.auth.bootstrap_admin --username admin
    ```
 
-   将结果写入 `.env`。必填的密钥或路径缺失时 Compose 会直接拒绝启动，不存在可工作的 `CHANGE_ME` 回退。另将 `MODEL_DIR` 设置为宿主机模型根目录，该目录必须包含 `bge-m3/` 和 `bge-reranker/`；Compose 会把它只读挂载为容器内 `/models`。Windows 可填写 `D:/models`，Linux 可填写 `/srv/metro-agent/models`。
+   `run --rm` 创建执行后即删除的一次性容器，并遵循 app 的依赖条件；密码不会作为命令行参数保存。`knowledge-backup` 不属于 `knowledge-admin` 启动路径。需要一致性备份时设置 `METRO_AGENT_ENV_FILE=$envFile` 与 `METRO_AGENT_COMPOSE_PROJECT_NAME=metro-agent-pilot`，再运行 `deploy/operations/backup-all.sh`；该脚本是唯一的正常备份入口，并在内部使用 `--profile knowledge-backup`。
 
-3. 构建并启动：
-
-   ```bash
-   docker compose up --build -d
-   docker compose ps -a
-   docker compose logs db-migrate auth-migrate
-   ```
-
-   `db-migrate` 和 `auth-migrate` 必须显示退出码 `0`；`/api/health` 仅表示进程存活，Compose 以会检查 MySQL、PostgreSQL、Redis 的 `/api/ready` 判断是否可接流量。需要本地模拟工具时使用 `docker compose --profile mock up --build -d`。
-
-4. 首次且仅首次，交互式写入第一个管理员：
-
-   ```bash
-   docker compose run --rm app python -m metro_agent.auth.bootstrap_admin --username admin
-   ```
-
-   `run --rm` 会创建执行后即删除的一次性容器，并按 `app` 的 `depends_on` 启动和等待数据库健康、两项迁移完成及 Redis healthy 等依赖；不要求常驻 `app` 容器已经运行。密码不会作为命令行参数保存。并发执行时 MySQL 命名锁保证最终只创建一个首管理员。
-
-5. 本机试用访问 `http://127.0.0.1:8000`。正式内部访问必须放在 HTTPS 反向代理之后，将 `.env` 设置为 `AUTH_COOKIE_SECURE=true`，重建应用，并确认浏览器收到 `Secure`、`HttpOnly`、`SameSite=Lax` Cookie。Compose 只把应用绑定到 `127.0.0.1:8000`，MySQL、PostgreSQL 和 Redis 不暴露宿主机端口。
+4. 内部访问必须通过 HTTPS。将 `.env` 中的 `AUTH_COOKIE_SECURE=true`，并为 Caddy 进程配置同一权威配置中的非秘密 `PILOT_FQDN` 与 `APP_HOST_PORT`。以 [`deploy/proxy/Caddyfile.example`](deploy/proxy/Caddyfile.example) 启动 Caddy；它终结 TLS 并仅反向代理至 `127.0.0.1:APP_HOST_PORT`。浏览器验收必须确认 `Secure`、`HttpOnly`、`SameSite=Lax` Cookie。Compose 从不公开 MySQL、PostgreSQL、Redis、Chroma 或 publisher 端口。
 
 ## 账号管理
 
@@ -109,7 +98,11 @@ MySQL DDL 隐式提交。auth-migrate 失败会继续阻断 `app`。执行 `depl
 
 ### 一致性备份、恢复与镜像回滚
 
-使用 `deploy/operations/backup-all.sh` 协调执行 `mysqldump --single-transaction`、`pg_dump`、Chroma 快照和 Redis `SAVE`。`restore-all.sh` 固定按 **MySQL -> PostgreSQL -> Chroma -> Redis** 恢复，并比较两个 Alembic revision、owner-counts 和 `/api/ready`。`rollback-image.sh` 只接受完整 `METRO_AGENT_IMAGE=...@sha256:...`，使用 `--no-build` 回滚镜像。可执行命令和中止条件见 `docs/operations/coordinated-backup-restore.md`。
+使用 `deploy/operations/backup-all.sh` 协调执行 `mysqldump --single-transaction`、`pg_dump`、Chroma 快照和 Redis `SAVE`。知识发布将 Chroma 卷和 artifact 卷作为单一版本化发布单元：备份在 `knowledge:publication` 锁预检后归档 `knowledge-chroma.tar.gz` 与 `knowledge-artifacts.tar.gz` 并写入 `SHA256SUMS`；恢复会先验证 registry/pointer/validated descriptor，再启动应用。release 和 artifact 是审计证据，默认永久保留，**不自动清理**。备份介质的静态加密、密钥保管和保留期限由备份目标负责。`restore-all.sh` 固定按 **MySQL -> PostgreSQL -> Chroma -> Redis** 恢复，并比较两个 Alembic revision、owner-counts 和 `/api/ready`。`rollback-image.sh` 只接受完整 `METRO_AGENT_IMAGE=...@sha256:...`，使用 `--no-build` 回滚镜像。可执行命令和中止条件见 `docs/operations/coordinated-backup-restore.md`。
+
+### 知识发布恢复演练
+
+`knowledge-e2e` profile 只使用仓库中版本化的合规 fixture 与确定性 embedding，不读取 `DEEPSEEK_API_KEY` 或其他模型密钥。首次部署、Chroma 大版本升级和任何恢复流程都必须在隔离环境完成该演练，覆盖构建、发布、查询、重启、回滚与 `verify`；演练不得删除历史 release 或 artifact。
 
 ## 已知限制
 
