@@ -1011,6 +1011,36 @@ def test_liveness_does_not_depend_on_readiness(auth_api) -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_first_knowledge_publication_has_liveness_before_strict_readiness(
+    auth_api,
+) -> None:
+    published = False
+
+    def readiness() -> None:
+        if not published:
+            raise ConnectionError("published release pointer is unavailable")
+
+    def build_app():
+        return create_app(
+            graph_factory=lambda: object(),
+            history_service_factory=lambda: auth_api.history,
+            monitoring_service_factory=lambda: FakeMonitoringService(),
+            auth_service_factory=lambda: auth_api.service,
+            readiness_checker=readiness,
+            chat_runner=auth_api.runner,
+        )
+
+    with TestClient(build_app(), raise_server_exceptions=False) as client:
+        assert client.get("/api/health").status_code == 200
+        assert client.get("/api/ready").status_code == 503
+        published = True
+        assert client.get("/api/ready").status_code == 200
+
+    with TestClient(build_app(), raise_server_exceptions=False) as restarted_client:
+        assert restarted_client.get("/api/health").status_code == 200
+        assert restarted_client.get("/api/ready").status_code == 200
+
+
 def test_readiness_returns_ok_when_all_dependencies_are_available(auth_api) -> None:
     calls = 0
 
