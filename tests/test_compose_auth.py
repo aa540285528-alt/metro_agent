@@ -232,8 +232,11 @@ def test_compose_isolates_published_knowledge_from_the_application() -> None:
         "wiremock",
     ]
     gateway = services["egress-gateway"]
+    assert gateway["image"] == "ubuntu/squid:6.6-24.04_beta"
     assert gateway["networks"] == ["app_egress", "controlled_egress"]
     assert gateway["read_only"] is True
+    assert "/var/log/squid:uid=13,gid=13,mode=0755" in gateway["tmpfs"]
+    assert "/var/spool/squid:uid=13,gid=13,mode=0755" in gateway["tmpfs"]
     assert compose["networks"]["app_egress"] == {"internal": True}
     assert compose["networks"]["controlled_egress"] == {"internal": False}
     assert {
@@ -252,6 +255,8 @@ def test_compose_isolates_published_knowledge_from_the_application() -> None:
     assert 'dstdomain "/etc/squid/allowed-domains.txt"' in squid_config
     assert "http_access allow allowed_model_destinations" in squid_config
     assert "http_access deny all" in squid_config
+    assert "access_log stdio:/var/log/squid/access.log" in squid_config
+    assert "cache_log /var/log/squid/cache.log" in squid_config
     for network in (
         "app_backend",
         "knowledge_frontend",
