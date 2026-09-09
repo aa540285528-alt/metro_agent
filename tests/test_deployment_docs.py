@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -168,3 +169,38 @@ def test_docs_define_guarded_legacy_and_executable_disaster_recovery() -> None:
     assert "候选数不等于 EXPECTED_COUNT" in legacy
     assert "MySQL -> PostgreSQL -> Chroma -> Redis" in recovery
     assert "完整 digest" in recovery
+
+
+def test_read_only_deployment_verifier_and_caddy_template_define_https_contract() -> None:
+    verifier_path = ROOT / "deploy" / "operations" / "verify-deployment.ps1"
+    caddyfile_path = ROOT / "deploy" / "proxy" / "Caddyfile.example"
+
+    assert verifier_path.exists()
+    assert caddyfile_path.exists()
+    verifier = verifier_path.read_text(encoding="utf-8")
+    caddyfile = caddyfile_path.read_text(encoding="utf-8")
+
+    for expected in (
+        "docker compose --env-file",
+        "config --quiet",
+        "ps --format json",
+        "POSTGRES_PASSWORD",
+        "AUTH_MYSQL_PASSWORD",
+        "MYSQL_ROOT_PASSWORD",
+        "AUTH_SESSION_PEPPER",
+        "MODEL_DIR",
+        "KNOWLEDGE_SOURCE_DIR",
+        "KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET",
+        "APP_HOST_PORT",
+    ):
+        assert expected in verifier
+    assert "$value" not in verifier
+    assert not re.search(
+        r"docker compose[^\r\n]*(?:\s)(?:up|down|start|stop|rm)\b",
+        verifier,
+    )
+
+    assert "{$PILOT_FQDN}" in caddyfile
+    assert "reverse_proxy 127.0.0.1:{$APP_HOST_PORT:8000}" in caddyfile
+    assert "header_up Host {host}" in caddyfile
+    assert "header_up X-Forwarded-Proto {scheme}" in caddyfile
