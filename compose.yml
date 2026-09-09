@@ -28,7 +28,7 @@ services:
       NO_PROXY: localhost,127.0.0.1,mysql,postgres,redis,knowledge-read-proxy,wiremock
       no_proxy: localhost,127.0.0.1,mysql,postgres,redis,knowledge-read-proxy,wiremock
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${APP_HOST_PORT:-8000}:8000"
     volumes:
       - mysql_ca:/etc/mysql/ca:ro
       - "${MODEL_DIR:?请在 .env 中设置 MODEL_DIR}:/models:ro"
@@ -46,7 +46,7 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready', timeout=3)"
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -249,7 +249,11 @@ services:
 
   knowledge-backup:
     image: ${METRO_AGENT_IMAGE:-metro-agent:local}
-    profiles: ["knowledge-admin"]
+    command:
+      - python
+      - -c
+      - "import sys; sys.stderr.write('Use deploy/operations/backup-all.sh for a governed backup.\\n'); raise SystemExit(64)"
+    profiles: ["knowledge-backup"]
     environment:
       REDIS_HOST: redis
       REDIS_PORT: "6379"

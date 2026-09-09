@@ -480,6 +480,12 @@ def test_backup_archives_complete_knowledge_release_unit_under_publication_lock(
         "knowledge_chroma_data:/chroma:ro",
         "knowledge_artifact_data:/var/lib/metro-agent/knowledge-artifacts:ro",
     ]
+    assert compose["services"]["knowledge-backup"]["profiles"] == [
+        "knowledge-backup"
+    ]
+    assert "backup-all.sh" in " ".join(
+        compose["services"]["knowledge-backup"]["command"]
+    )
     assert "a.add('/chroma',arcname='chroma')" in backup
     assert "safe-restore-tar.py replace-volume-contents /backup/knowledge-chroma.tar.gz" in (
         OPERATIONS / "restore-all.sh"

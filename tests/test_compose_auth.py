@@ -64,7 +64,7 @@ def test_compose_injects_auth_configuration_and_limits_public_ports() -> None:
     app = services["app"]
     environment = app["environment"]
 
-    assert app["ports"] == ["127.0.0.1:8000:8000"]
+    assert app["ports"] == ["127.0.0.1:${APP_HOST_PORT:-8000}:8000"]
     assert "postgres:5432/metro_agent" in environment["DATABASE_URL"]
     assert "mysql:3306/metro_auth" in environment["AUTH_DATABASE_URL"]
     assert environment["SHORT_TERM_MEMORY_REDIS_URL"] == "redis://redis:6379"
@@ -82,11 +82,24 @@ def test_compose_injects_auth_configuration_and_limits_public_ports() -> None:
         "OLLAMA_BASE_URL",
     ):
         assert provider_variable in environment
-    assert "api/ready" in " ".join(app["healthcheck"]["test"])
+    healthcheck = " ".join(app["healthcheck"]["test"])
+    assert "api/health" in healthcheck
+    assert "api/ready" not in healthcheck
     assert app["restart"] == "unless-stopped"
 
     assert services["wiremock"]["profiles"] == ["mock"]
     assert set(services["mysql"]["depends_on"]) == {"mysql-cert-init"}
+    for service_name in (
+        "mysql",
+        "postgres",
+        "redis",
+        "chroma",
+        "knowledge-publisher",
+        "knowledge-read-proxy",
+        "knowledge-indexer",
+        "knowledge-backup",
+    ):
+        assert "ports" not in services[service_name]
 
 
 def test_compose_requires_database_passwords_and_session_pepper() -> None:
@@ -274,6 +287,20 @@ def test_compose_runs_knowledge_indexer_only_as_an_admin_profile() -> None:
     assert indexer["networks"] == ["knowledge_backend"]
     assert any(value.endswith(":ro") for value in indexer["volumes"])
     assert any(not value.endswith(":ro") for value in indexer["volumes"])
+
+
+def test_compose_keeps_backup_out_of_admin_startup() -> None:
+    backup = _compose()["services"]["knowledge-backup"]
+
+    assert backup["profiles"] == ["knowledge-backup"]
+    assert backup["restart"] == "no"
+    assert backup["volumes"] == [
+        "knowledge_chroma_data:/chroma:ro",
+        "knowledge_artifact_data:/var/lib/metro-agent/knowledge-artifacts:ro",
+    ]
+    command = " ".join(backup["command"])
+    assert "backup-all.sh" in command
+    assert "SystemExit(64)" in command
 
 
 def test_knowledge_admin_wrappers_only_accept_governed_commands() -> None:
