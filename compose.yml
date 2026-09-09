@@ -6,6 +6,7 @@ services:
       DATABASE_URL: "postgresql+psycopg://metro_agent:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@postgres:5432/metro_agent"
       AUTH_DATABASE_URL: "mysql+pymysql://metro_auth:${AUTH_MYSQL_PASSWORD:?请在 .env 中设置 AUTH_MYSQL_PASSWORD}@mysql:3306/metro_auth?ssl_ca=/etc/mysql/ca/ca.pem&ssl_check_hostname=true"
       AUTH_SESSION_PEPPER: "${AUTH_SESSION_PEPPER:?请在 .env 中设置 AUTH_SESSION_PEPPER}"
+      KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET: "${KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET:?请在 .env 中设置 KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET}"
       AUTH_COOKIE_SECURE: "${AUTH_COOKIE_SECURE:-false}"
       AUTH_SESSION_TTL_SECONDS: "${AUTH_SESSION_TTL_SECONDS:-28800}"
       SHORT_TERM_MEMORY_REDIS_URL: redis://redis:6379

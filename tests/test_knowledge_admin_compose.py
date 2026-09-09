@@ -52,6 +52,10 @@ def test_compose_adds_an_internal_knowledge_publisher_worker() -> None:
         if any("knowledge-upload-staging" in value for value in service.get("volumes", []))
     }
     assert services_with_staging == {"knowledge-publisher"}
+    assert (
+        services["app"]["environment"]["KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET"]
+        == "${KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET:?请在 .env 中设置 KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET}"
+    )
     assert "KNOWLEDGE_UPLOAD_STAGING_ROOT" not in services["app"]["environment"]
     assert "KNOWLEDGE_UPLOAD_STAGING_ROOT" not in services["knowledge-read-proxy"]["environment"]
     assert "KNOWLEDGE_UPLOAD_STAGING_ROOT" not in services["knowledge-indexer"]["environment"]
