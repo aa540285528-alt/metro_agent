@@ -17,7 +17,7 @@ def test_readme_states_pilot_scope_quality_and_deployment_flow() -> None:
         "answer_relevance=0.8635",
         "answer_accuracy=0.7235",
         "不算模型质量验收通过",
-        "docker compose up --build -d",
+        "docker compose --env-file $envFile --project-name metro-agent-pilot --profile knowledge-admin up --build -d",
         "bootstrap_admin",
         "AUTH_COOKIE_SECURE=true",
         "无自注册",
@@ -30,7 +30,7 @@ def test_readme_uses_one_off_bootstrap_container_and_accurate_origin_rules() -> 
     readme = _read("README.md")
 
     assert (
-        "docker compose run --rm app python -m "
+        "docker compose --env-file $envFile --project-name metro-agent-pilot run --rm app python -m "
         "metro_agent.auth.bootstrap_admin --username admin"
     ) in readme
     assert "一次性容器" in readme
@@ -204,3 +204,30 @@ def test_read_only_deployment_verifier_and_caddy_template_define_https_contract(
     assert "reverse_proxy 127.0.0.1:{$APP_HOST_PORT:8000}" in caddyfile
     assert "header_up Host {host}" in caddyfile
     assert "header_up X-Forwarded-Proto {scheme}" in caddyfile
+
+
+def test_internal_pilot_runbook_and_acceptance_record_define_knowledge_deployment_contract() -> None:
+    readme = _read("README.md")
+    recovery = _read("docs/operations/coordinated-backup-restore.md")
+    acceptance = _read("docs/operations/internal-pilot-auth-acceptance.md")
+    documentation = "\n".join((readme, recovery, acceptance))
+
+    for expected in (
+        "--env-file",
+        "--project-name metro-agent-pilot",
+        "APP_HOST_PORT",
+        "KNOWLEDGE_SOURCE_DIR",
+        "KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET",
+        "deploy/operations/verify-deployment.ps1",
+        "deploy/proxy/Caddyfile.example",
+        "--profile knowledge-backup",
+        "backup-all.sh",
+        "首次发布前",
+        "PILOT_FQDN",
+        "版本 ID",
+        "包 SHA-256",
+        "操作者",
+        "镜像 digest",
+        "证据位置",
+    ):
+        assert expected in documentation

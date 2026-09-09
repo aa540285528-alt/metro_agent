@@ -471,7 +471,7 @@ def test_backup_archives_complete_knowledge_release_unit_under_publication_lock(
     assert "knowledge-artifacts.tar.gz" in backup
     assert "knowledge:publication" in lock_helper.read_text(encoding="utf-8")
     assert "PublicationLock" in lock_helper.read_text(encoding="utf-8")
-    assert "docker compose stop app knowledge-read-proxy chroma" in backup
+    assert "compose stop app knowledge-read-proxy chroma" in backup
     assert "knowledge-indexer" in backup
     # The backup container sees the Chroma volume root at /chroma; the running
     # Chroma service mounts that same root at /chroma/chroma.  Archive the
@@ -492,6 +492,15 @@ def test_backup_archives_complete_knowledge_release_unit_under_publication_lock(
     ).read_text(encoding="utf-8")
 
 
+def test_backup_uses_the_declared_deployment_env_and_project_name() -> None:
+    backup = (OPERATIONS / "backup-all.sh").read_text(encoding="utf-8")
+
+    assert "METRO_AGENT_ENV_FILE" in backup
+    assert "METRO_AGENT_COMPOSE_PROJECT_NAME" in backup
+    assert "docker compose --env-file \"$METRO_AGENT_ENV_FILE\"" in backup
+    assert "--project-name \"$METRO_AGENT_COMPOSE_PROJECT_NAME\"" in backup
+
+
 def test_backup_holds_one_publication_token_before_stopping_knowledge_services() -> None:
     backup = (OPERATIONS / "backup-all.sh").read_text(encoding="utf-8")
     lock_helper = (OPERATIONS / "with-knowledge-publication-lock.py").read_text(
@@ -501,7 +510,7 @@ def test_backup_holds_one_publication_token_before_stopping_knowledge_services()
     assert " hold " in backup
     assert "verify-token" in backup
     assert backup.index("hold") < backup.index("knowledge-indexer")
-    assert backup.index("hold") < backup.index("docker compose stop app knowledge-read-proxy chroma")
+    assert backup.index("hold") < backup.index("compose stop app knowledge-read-proxy chroma")
     assert backup.index("knowledge-chroma.tar.gz") < backup.index("SHA256SUMS")
     assert "trap release_publication_lock EXIT HUP INT TERM" in backup
     assert ": > \"$LOCK_RELEASE_FILE\"" in backup

@@ -4,10 +4,12 @@
 
 ## 一致性备份
 
-将 `METRO_AGENT_IMAGE` 设置为已验收镜像的**完整 digest**，不能使用浮动 tag：
+将 `METRO_AGENT_IMAGE` 设置为已验收镜像的**完整 digest**，不能使用浮动 tag。备份脚本只接受唯一部署 `.env` 的绝对路径和固定项目名，不会从当前工作目录猜测 `.env`；正常 `--profile knowledge-admin up -d` 不会启动 `knowledge-backup`，后者仅由本脚本以 `--profile knowledge-backup` 的一次性容器使用：
 
 ```sh
 export METRO_AGENT_IMAGE=registry.example/metro-agent@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+export METRO_AGENT_ENV_FILE=/srv/metro-agent/pilot/.env
+export METRO_AGENT_COMPOSE_PROJECT_NAME=metro-agent-pilot
 deploy/operations/backup-all.sh /srv/metro-backups/pilot-20260826
 ```
 

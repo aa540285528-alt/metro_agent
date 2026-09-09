@@ -16,15 +16,32 @@
 
 ## 部署与秘密
 
-- [ ] 全新环境执行 `docker compose up --build -d` 成功；数据库无宿主机端口，应用仅监听 `127.0.0.1:8000`。
+- [ ] 全新环境使用唯一 `.env` 执行 `docker compose --env-file <部署 .env> --project-name metro-agent-pilot --profile knowledge-admin up --build -d` 成功；数据库无宿主机端口，应用仅监听 `127.0.0.1:APP_HOST_PORT`。
 - [ ] `.env` 的 `MODEL_DIR` 指向包含 `bge-m3/`、`bge-reranker/` 的宿主机目录，应用容器仅以只读方式挂载 `/models`。
 - [ ] Redis 健康检查通过，且 `redis-cli COMMAND INFO FT.INFO` 返回命令信息；不得使用缺少 Search 能力的基础 Redis 7。
 - [ ] `db-migrate`、`auth-migrate` 均退出码 `0`，已记录两个 Alembic revision。
-- [ ] `/api/health` liveness 与 `/api/ready` readiness 均通过；readiness 已实际覆盖 PostgreSQL、MySQL、Redis。
+- [ ] `/api/health` liveness 返回 `200`；首次发布前 `/api/ready` 返回 `503`，发布且重启后才返回 `200`，且 readiness 实际覆盖 PostgreSQL、MySQL、Redis 和已发布知识。
 - [ ] CI 实际完成 Docker image build，并记录应用镜像 digest。
 - [ ] `POSTGRES_PASSWORD`、`AUTH_MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD`、至少 32 字节 pepper 均独立生成且未使用样例值。
 - [ ] gitleaks/秘密扫描通过；日志抽查不含密码、原始 Cookie、token 或工具敏感参数。
 - [ ] HTTPS 反向代理可用，`AUTH_COOKIE_SECURE=true`；浏览器验证 Secure Cookie、`HttpOnly`、`SameSite=Lax`。
+
+## 知识管理专项验收
+
+每项均须填写命令或网页操作、预期结果、实际观察值和证据位置；不得记录密码或 token。
+
+| 项目 | 命令或网页操作 | 预期结果 | 实际观察值 | 证据位置 |
+|---|---|---|---|---|
+| 管理员登录 | HTTPS 页面以管理员账号登录 | 进入知识管理入口 |  |  |
+| 上传脱敏真实 ZIP | 管理员上传真实但已脱敏的知识包 | 创建 draft，记录包 SHA-256 |  |  |
+| 校验 | 等待或刷新 draft 状态 | 校验成功，可发布 |  |  |
+| 发布 | 管理员确认发布 | 生成当前版本 ID |  |  |
+| 带来源查询 | 对已发布来源提出可追溯问题 | 返回答案及来源，`/api/ready=200` |  |  |
+| 非管理员隔离 | 普通用户请求知识管理 API | 返回 `403` |  |  |
+| 发布失败保持版本 | 记录当前版本后触发受控失败发布 | 当前版本 ID 不变 |  |  |
+| 回滚 | 回滚至旧版本并再次查询 | 查询命中旧版本 |  |  |
+| 重启后知识就绪 | 重启 app 后请求 `/api/health` 与 `/api/ready` | 两者返回 `200` |  |  |
+| 审计字段 | 填写版本 ID、包 SHA-256、操作者、镜像 digest | 字段完整且无秘密 |  |  |
 
 ## 身份、权限与隔离
 
