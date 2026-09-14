@@ -20,34 +20,34 @@ Realtime Agent —— 实时告警查询 Agent
   4. 若 ReAct 漏调工具但参数完整，则使用确定性 fallback 查询
 """
 
-import json  # 用于将工具返回的字典序列化为 JSON，传递到 ToolMessage
+import json
 import re
 from uuid import uuid4
 from langchain.agents import create_agent
 from langchain.messages import SystemMessage, HumanMessage, ToolMessage
 
 from metro_agent.config import (
-    AGENT_CONTEXT_PROFILES,        # 各 Agent 的上下文配置（input_limit / tool_max / priority 等）
-    build_Ollama_qwenLLM,          # 工厂函数：创建本地 Ollama Qwen2.5 7B 连接
-    REALTIME_AGENT_PROMPT,         # 实时告警系统提示词
-    TOOL_CONTEXT_MAX_ITEMS,        # 历史工具记录最多保留条数（默认 3）
-    TOOL_CONTEXT_MAX_RESULT_CHARS, # 单条历史工具结果最大字符数（默认 2000）
+    AGENT_CONTEXT_PROFILES,
+    build_Ollama_qwenLLM,
+    REALTIME_AGENT_PROMPT,
+    TOOL_CONTEXT_MAX_ITEMS,
+    TOOL_CONTEXT_MAX_RESULT_CHARS,
 )
 from metro_agent.memory.short_term.agent_context_assembler import (
-    AgentContextAssembler,  # 按 Agent 预算组装对话历史上下文
+    AgentContextAssembler,
 )
 from metro_agent.tools.Realtime_tools import (
-    query_alarm_tool,  # 告警查询工具：根据线路/车站/系统查询实时告警
+    query_alarm_tool,
 )
 from metro_agent.state import MetroAgentState
 from metro_agent.observability.agent_usage import LLM_USAGE_RECORDS_KEY, capture_response_usages
 from metro_agent.memory.short_term.tool_context_builder import (
-    ToolContextBuilder,  # 从中心黑板提取历史工具调用记录
+    ToolContextBuilder,
 )
 
-# ============================================================
-# LLM 实例与上下文构建器（模块级单例）
-# ============================================================
+
+
+
 
 
 realtime_agent_LLM= None
@@ -70,9 +70,9 @@ realtime_tool_context_builder = ToolContextBuilder(
     max_result_chars=TOOL_CONTEXT_MAX_RESULT_CHARS,
 )
 
-# ============================================================
-# 工具结果预算截断
-# ============================================================
+
+
+
 
 
 def infer_alarm_query_from_text(text: str) -> dict | None:
@@ -162,27 +162,27 @@ def build_budgeted_tool_content(
     Returns:
         str: 完整 JSON 字符串（未超预算）或截断预览 JSON（超预算）。
     """
-    # 将工具结果序列化为完整 JSON，计算实际 token 消耗
+
     raw_text = json.dumps(
         result,
-        ensure_ascii=False,  # 保留中文，不转义为 \uXXXX
-        default=str,         # 不可序列化对象降级为字符串
+        ensure_ascii=False,
+        default=str,
     )
 
-    # 未超预算 → 完整返回
+
     if realtime_context_assembler.count_text(
         raw_text
     ) <= token_budget:
         return raw_text
 
-    # 超预算 → 截断预览
-    # 预留 50 token 给包装 JSON 的结构字符
+
+
     preview = realtime_context_assembler.truncate_text(
         raw_text,
         max(0, token_budget - 50),
     )
 
-    # 返回带有 truncated 标记的 JSON，告知 LLM 这不是完整数据
+
     return json.dumps(
         {
             "truncated": True,
@@ -234,9 +234,9 @@ def extract_tool_records_from_react_messages(messages: list) -> dict:
 
 
 
-# ============================================================
-# 实时告警 Agent
-# ============================================================
+
+
+
 
 
 def realtime_agent(state: MetroAgentState) -> dict:
@@ -311,7 +311,7 @@ def realtime_agent(state: MetroAgentState) -> dict:
         react_result_messages
     )
 
-    # 本地小模型偶尔会漏调工具。参数完整时，用确定性解析兜底，保证黑板有真实观察结果。
+
     if not tool_records:
         fallback_query = infer_alarm_query_from_text(state["user_input"])
         if fallback_query:

@@ -21,12 +21,12 @@ ToolContextBuilder —— 工具调用结果上下文构建器
     context_text = builder.build_text(tool_results)  # → 可直接嵌入 prompt 的字符串
 """
 
-import json  # 将 Python 对象序列化为 JSON 字符串，便于 LLM 解析
-from typing import Any  # 工具参数和结果的类型可以是任意 JSON 可序列化的值
+import json
+from typing import Any
 
 from metro_agent.config import (
-    TOOL_CONTEXT_MAX_ITEMS,          # 最多保留多少条工具调用记录
-    TOOL_CONTEXT_MAX_RESULT_CHARS,   # 单条工具返回结果的最大字符数
+    TOOL_CONTEXT_MAX_ITEMS,
+    TOOL_CONTEXT_MAX_RESULT_CHARS,
 )
 
 
@@ -62,9 +62,9 @@ class ToolContextBuilder:
         self.max_items = max_items
         self.max_result_chars = max_result_chars
 
-    # ------------------------------------------------------------------
-    # 步骤 1：选取最近的工具调用记录
-    # ------------------------------------------------------------------
+
+
+
 
     def select_latest(
         self,
@@ -84,11 +84,11 @@ class ToolContextBuilder:
             (tool_call_id, record) 元组列表，最多 max_items 条，按时间升序排列。
         """
         items = list(tool_results.items())
-        return items[-self.max_items:]  # 取列表末尾 N 条（最新的记录）
+        return items[-self.max_items:]
 
-    # ------------------------------------------------------------------
-    # 步骤 2：格式化记录为文本
-    # ------------------------------------------------------------------
+
+
+
 
     def format_records(
         self,
@@ -114,28 +114,28 @@ class ToolContextBuilder:
         sections = []
 
         for tool_call_id, record in records:
-            # 序列化参数 —— 使用 default=str 处理无法直接序列化的对象
+
             arguments = json.dumps(
                 record.get("arguments", {}),
-                ensure_ascii=False,  # 保留中文，不转义为 \uXXXX
-                default=str,         # 遇到不可序列化类型时降级为 str()
+                ensure_ascii=False,
+                default=str,
             )
 
-            # 序列化结果
+
             result = json.dumps(
                 record.get("result"),
                 ensure_ascii=False,
                 default=str,
             )
 
-            # 截断过长的结果，避免单条数据撑爆 LLM 上下文窗口
+
             if len(result) > self.max_result_chars:
                 result = (
                     result[:self.max_result_chars]
                     + "...（已截断）"
                 )
 
-            # 组装单条记录的文本块
+
             sections.append(
                 "\n".join([
                     f"调用ID：{tool_call_id}",
@@ -145,11 +145,11 @@ class ToolContextBuilder:
                 ])
             )
 
-        return "\n\n".join(sections)  # 记录之间用空行分隔，便于 LLM 区分
+        return "\n\n".join(sections)
 
-    # ------------------------------------------------------------------
-    # 步骤 3：一站式构建文本上下文
-    # ------------------------------------------------------------------
+
+
+
 
     def build_text(
         self,

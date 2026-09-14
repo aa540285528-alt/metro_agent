@@ -17,7 +17,7 @@
 import sys
 from pathlib import Path
 
-# 确保能导入项目根目录的 config 和同级的 memory_system
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from langmem import create_memory_manager
@@ -30,9 +30,9 @@ from metro_agent.config import (
 from metro_agent.memory.long_term.models import MemoryCandidate
 
 
-# ============================================================
-# 记忆策展器
-# ============================================================
+
+
+
 class MemoryCurator:
     """
     从对话中提取长期记忆候选项。
@@ -48,21 +48,21 @@ class MemoryCurator:
     """
 
     def __init__(self):
-        # 创建 LangMem 记忆管理器，绑定 LLM 和输出 schema
+
         self.manager = create_memory_manager(
-            build_Ollama_qwenLLM(),                  # 使用 Ollama Qwen 模型
-            schemas=[MemoryCandidate],               # 强制输出符合 MemoryCandidate 结构
-            instructions=MEMORY_INSTRUCTIONS_PROMPT, # 系统提示词：定义提取规则
-            enable_inserts=True,                      # 允许提取新记忆
-            enable_updates=False,                     # 不在此层做更新
-            enable_deletes=False,                     # 不在此层做删除
+            build_Ollama_qwenLLM(),
+            schemas=[MemoryCandidate],
+            instructions=MEMORY_INSTRUCTIONS_PROMPT,
+            enable_inserts=True,
+            enable_updates=False,
+            enable_deletes=False,
         )
 
     def extract(
         self,
         *,
-        user_text: str,       # 用户原始输入
-        assistant_text: str,  # 助手回复内容
+        user_text: str,
+        assistant_text: str,
     ) -> list[MemoryCandidate]:
         """
         从一轮对话中提取长期记忆候选项。
@@ -74,31 +74,31 @@ class MemoryCurator:
 
         返回：MemoryCandidate 列表（可能为空，表示无值得记忆的内容）
         """
-        # 调用 LangMem manager，传入对话消息
+
         extracted = self.manager.invoke({
             "messages": [
                 HumanMessage(content=user_text)
             ]
         })
 
-        # 统一转换为 MemoryCandidate 列表
-        # manager 可能直接返回 MemoryCandidate 对象，也可能返回 dict，做兼容处理
+
+
         candidates = []
         for item in extracted:
             content = item.content
             if isinstance(content, MemoryCandidate):
-                # 已是 MemoryCandidate 对象，直接加入
+
                 candidates.append(content)
             else:
-                # 是 dict 或其他格式，通过 Pydantic 校验转换
+
                 candidates.append(MemoryCandidate.model_validate(content))
 
         return candidates
 
 
-# ============================================================
-# 单例构建函数
-# ============================================================
+
+
+
 _memory_curator = None
 
 

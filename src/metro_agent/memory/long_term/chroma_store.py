@@ -25,22 +25,22 @@ from metro_agent.memory.long_term.models import MemoryRecord
 from metro_agent.config import EMBEDDING_MODEL
 
 
-# ============================================================
-# 检索结果数据结构
-# ============================================================
+
+
+
 @dataclass(frozen=True)
 class MemorySearchResult:
     """单条向量检索结果，不可变"""
 
-    memory_id: str           # 记忆唯一标识
-    content: str             # 记忆文本内容
+    memory_id: str
+    content: str
     metadata: dict[str, Any]
-    score: float             # 相似度分数（0.0 ~ 1.0，越高越相似）
+    score: float
 
 
-# ============================================================
-# Chroma 记忆存储
-# ============================================================
+
+
+
 class ChromaMemoryStore:
     """
     基于 ChromaDB 的记忆向量存储。
@@ -56,37 +56,37 @@ class ChromaMemoryStore:
 
     def __init__(
         self,
-        persist_directory: Path,                      # ChromaDB 持久化目录
-        collection_name: str,                         # 集合名称（类似数据库表名）
-        embedding_model: HuggingFaceEmbeddings,       # 嵌入模型（用于文本向量化）
+        persist_directory: Path,
+        collection_name: str,
+        embedding_model: HuggingFaceEmbeddings,
     ):
-        # 确保持久化目录存在
+
         persist_directory.mkdir(parents=True, exist_ok=True)
 
         self.embedding_model = embedding_model
 
-        # 创建 ChromaDB 持久化客户端
+
         self.client = chromadb.PersistentClient(path=str(persist_directory))
 
-        # 获取或创建集合，使用 HNSW 索引 + 余弦距离
-        # embedding_function=None 表示手动传入向量（不依赖 Chroma 内置嵌入）
+
+
         self.collection = (
             self.client.get_or_create_collection(
                 name=collection_name,
                 configuration={
                     "hnsw": {
-                        "space": "cosine",  # 余弦空间，与归一化向量的内积一致
+                        "space": "cosine",
                     }
                 },
-                embedding_function=None,  # 我们自己计算向量，不走 Chroma 内置嵌入
+                embedding_function=None,
             )
         )
-    #删除记忆 
+
     def delete(self, memory_id: str) -> None:
         self.collection.delete(ids=[memory_id])
-    # ============================================================
-    # 写入 / 更新
-    # ============================================================
+
+
+
     def upsert(self, record: MemoryRecord) -> None:
         """
         将一条记忆记录写入 ChromaDB（已存在则覆盖）。
@@ -98,12 +98,12 @@ class ChromaMemoryStore:
         """
         if not record.content.strip():
             raise ValueError("禁止向 Chroma 写入空记忆")
-        # 文本 → 向量
+
         embedding = self.embedding_model.embed_query(
             record.content
         )
 
-        # 构建元数据字典（ChromaDB 只接受 str / int / float / bool）
+
         metadata = {
             "user_id": record.user_id,
             "category": record.category,
@@ -118,7 +118,7 @@ class ChromaMemoryStore:
             "version": record.version,
         }
 
-        # 可选字段：仅在有值时写入
+
         if record.target_date is not None:
             metadata["target_date"] = record.target_date.isoformat()
 
@@ -128,7 +128,7 @@ class ChromaMemoryStore:
         if record.previous_id is not None:
             metadata["previous_id"] = record.previous_id
 
-        # 写入 ChromaDB（id 相同则覆盖）
+
         self.collection.upsert(
             ids=[record.memory_id],
             documents=[record.content],
@@ -179,15 +179,15 @@ class ChromaMemoryStore:
         )
 
         return memories
-    # ============================================================
-    # 检索
-    # ============================================================
+
+
+
     def search(
         self,
         *,
-        user_id: str,   # 必须参数：按用户隔离检索
-        query: str,      # 必须参数：查询文本
-        limit: int = 5,  # 返回结果数量上限
+        user_id: str,
+        query: str,
+        limit: int = 5,
     ) -> list[MemorySearchResult]:
         """
         按用户过滤 + 向量相似度检索活跃记忆。
@@ -200,31 +200,31 @@ class ChromaMemoryStore:
 
         score 计算：将 ChromaDB 的 cosine distance 转换为相似度分数（1.0 - distance）
         """
-        # 空集合直接返回，避免不必要的嵌入计算
+
         if self.collection.count() == 0:
             return []
 
-        # query 文本 → 向量
+
         query_embedding = self.embedding_model.embed_query(query)
 
-        # ChromaDB 向量查询 + 元数据过滤
+
         result = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=min(limit, self.collection.count()),
             where={
                 "$and": [
-                    {"user_id": {"$eq": user_id}},     # 按用户隔离
-                    {"status": {"$eq": "active"}},     # 只查活跃记忆
+                    {"user_id": {"$eq": user_id}},
+                    {"status": {"$eq": "active"}},
                 ]
             },
             include=[
-                "documents",   # 原文内容
-                "metadatas",   # 元数据
-                "distances",   # 余弦距离（0=完全相同, 2=完全相反）
+                "documents",
+                "metadatas",
+                "distances",
             ],
         )
 
-        # 组装结果列表
+
         memories = []
         ids = result["ids"][0]
         documents = result["documents"][0]
@@ -237,22 +237,22 @@ class ChromaMemoryStore:
             metadatas,
             distances,
         ):
-            # 余弦距离 → 相似度：1.0 - distance，最小为 0
+
             memories.append(
                 MemorySearchResult(
                     memory_id=memory_id,
                     content=content,
                     score=max(0.0, 1.0 - distance),
-                    metadata=metadata,  # 注意：此处传入 dict，需上层按需重构 MemoryRecord
+                    metadata=metadata,
                 )
             )
         return memories
 
 
-# ============================================================
-# 单例构建函数
-# 全局唯一实例，避免重复初始化 ChromaDB 客户端和加载模型
-# ============================================================
+
+
+
+
 _memory_store = None
 
 def build_memory_store() -> ChromaMemoryStore:

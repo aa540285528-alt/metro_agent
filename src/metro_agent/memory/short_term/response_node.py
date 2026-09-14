@@ -21,7 +21,7 @@ from langchain_core.messages import AIMessage
 import sys
 from pathlib import Path
 
-# 确保能导入项目根目录的模块
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from metro_agent.state import MetroAgentState
@@ -58,8 +58,8 @@ def record_assistant_message(
 
     if not round_id or not round_number:
         raise ValueError("当前对话缺少round_id或round_number")
-    # 从 agents_output 中提取各 agent 的有效回复
-    # 过滤掉 sources/sources_score（属于元数据，不属于对话内容）
+
+
     history_parts = [
         str(output).strip()
         for name, output in outputs.items()
@@ -69,17 +69,17 @@ def record_assistant_message(
         )
     ]
 
-    # 用空行拼接各 agent 的输出，作为本轮助手回复的原始内容
+
     assistant_content = "\n\n".join(history_parts)
 
-    # 降级：如果 agents_output 为空，使用 final_answer
+
     if not assistant_content:
         assistant_content = state.get(
             "final_answer",
             "",
         ).strip()
 
-    # 最终兜底：无任何有效内容时不写入
+
     if not assistant_content:
         return {}
 

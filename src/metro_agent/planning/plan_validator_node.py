@@ -24,12 +24,12 @@ PlanValidatorNode —— 计划校验节点
 import sys
 from pathlib import Path
 
-# 将项目根目录加入 sys.path，以便导入 config / state 等顶层模块
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from metro_agent.planning.factory import create_event     # 构造 PlanEvent 记录校验结果
-from metro_agent.planning.models import ExecutionPlan    # 计划的 Pydantic 数据模型
-from metro_agent.planning.validator import validate_plan # 确定性校验函数（纯 Python，不调 LLM）
+from metro_agent.planning.factory import create_event
+from metro_agent.planning.models import ExecutionPlan
+from metro_agent.planning.validator import validate_plan
 from pydantic import ValidationError
 from metro_agent.observability.node_instrumentation import traced_node
 from metro_agent.state import MetroAgentState
@@ -69,17 +69,17 @@ def plan_validator_node(state: MetroAgentState) -> dict:
           - planning_error:  失败时的错误信息（多行文本，\\n 分隔）
           - planning_events: PlanEvent 列表（追踪校验过程）
     """
-    # --------------------------------------------------------------
-    # 从 state 中提取计划数据
-    # state["execution_plan"] 是 planner_node 写入的 dict，
-    # 需要用 ExecutionPlan(**plan_data) 反序列化为 Pydantic 模型
-    # --------------------------------------------------------------
+
+
+
+
+
     plan_data = state.get("execution_plan")
 
-    # ==============================================================
-    # 分支 A：计划缺失 —— state 中根本没有 execution_plan
-    # 可能原因：planner_node 在上一步执行失败或未执行
-    # ==============================================================
+
+
+
+
     if not plan_data:
         event = create_event(
             event_type="plan_validation_failed",
@@ -92,12 +92,12 @@ def plan_validator_node(state: MetroAgentState) -> dict:
             "planning_events": [event.model_dump(mode="json")],
         }
 
-    # --------------------------------------------------------------
-    # 反序列化：dict → ExecutionPlan Pydantic 对象
-    # 如果 plan_data 中的字段与 ExecutionPlan schema 不匹配，
-    # Pydantic 会在此处抛出 ValidationError（预期外的情况，
-    # 因为 planner_node 的 create_plan 应保证 schema 合法）
-    # --------------------------------------------------------------
+
+
+
+
+
+
     try:
         plan = ExecutionPlan(**plan_data)
     except ValidationError as exc:
@@ -113,69 +113,69 @@ def plan_validator_node(state: MetroAgentState) -> dict:
             "planning_events": [event.model_dump(mode="json")],
         }
 
-    # ==============================================================
-    # 调用 validator 进行 6 项确定性检查
-    #
-    # validate_plan() 内部逻辑（见 validator.py）：
-    #   1. 空计划检查
-    #   2. 步骤数上限检查
-    #   3. step_id 重复检查
-    #   4. agent 合法性检查
-    #   5. 依赖存在性检查
-    #   6. 循环依赖检查（DFS 检测环）
-    #
-    # 全部是纯 Python 逻辑，不调 LLM，延迟可忽略
-    # ==============================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
     errors = validate_plan(plan)
 
-    # ==============================================================
-    # 分支 B：校验不通过 —— 计划存在结构性问题
-    #
-    # errors 示例：
-    #   ["步骤 step_3 使用了不允许的 agent: unknown_agent",
-    #    "步骤 step_5 依赖了不存在的步骤: step_99",
-    #    "计划存在循环依赖"]
-    #
-    # 这些错误需要返回给上游（planner_node）进行修正
-    # ==============================================================
+
+
+
+
+
+
+
+
+
+
     if errors:
         event = create_event(
             event_type="plan_validation_failed",
             message="计划校验失败",
-            metadata={"errors": errors},  # 将错误列表附加到事件元数据中
+            metadata={"errors": errors},
         )
         return {
             "planning_status": "failed",
-            # 多行错误用 \n 拼接，方便日志阅读和 LLM 分析
+
             "planning_error": "\n".join(errors),
             "final_answer": "【计划校验失败】\n生成的计划不满足执行规则，请稍后重试。",
             "planning_events": [event.model_dump(mode="json")],
         }
 
-    # ==============================================================
-    # 分支 C：校验通过 —— 将计划从 draft 状态推进到 validated
-    #
-    # validated 状态意味着：
-    #   - DAG 结构合法（无循环、无缺失依赖）
-    #   - 所有 agent 在白名单内
-    #   - 步数在合理范围内
-    #   - 可以安全地交给 scheduler_node 执行
-    # ==============================================================
+
+
+
+
+
+
+
+
+
     event = create_event(
         event_type="plan_validated",
         message="计划校验通过",
-        metadata={"step_count": len(plan.steps)},  # 记录步骤数便于监控
+        metadata={"step_count": len(plan.steps)},
     )
 
-    # 更新计划状态：draft → validated
-    # 这是 ExecutionPlan 生命周期中的第一次状态迁移
+
+
     plan.status = "validated"
 
     return {
-        # 返回完整计划（status 已更新），覆盖 state 中的旧版本
+
         "execution_plan": plan.model_dump(mode="json"),
         "planning_status": "validated",
-        # 清空之前的错误信息（如果有的话）
+
         "planning_error": "",
         "planning_events": [event.model_dump(mode="json")],
     }

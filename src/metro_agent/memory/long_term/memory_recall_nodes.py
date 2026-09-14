@@ -14,7 +14,7 @@ from metro_agent.memory.long_term.chroma_store import build_memory_store
 from metro_agent.memory.long_term.memory_intent import detect_memory_category
 
 
-# 构建全局记忆存储实例，基于 Chroma 向量数据库
+
 _memory_store = None
 
 
@@ -25,7 +25,7 @@ def get_memory_store():
         _memory_store = build_memory_store()
 
     return _memory_store
-# 记忆类别 → 中文显示名称映射，用于生成自然语言的回复文本
+
 CATEGORY_NAMES = {
     "plan": "计划",
     "goal": "目标",
@@ -53,29 +53,29 @@ def memory_recall_node(
         - final_answer: 格式化后的自然语言回复，告知用户其已保存的记忆内容
         - recalled_memories: 原始记忆对象列表，供下游节点使用
     """
-    # 第一步：检测用户想要查询的记忆类别
+
     category = detect_memory_category(
         state["user_input"]
     )
 
-    # 第二步：从记忆存储中查询该类别的活跃记忆
+
     memories = get_memory_store().list_active(
         user_id=state["user_id"],
         category=category,
     )
 
-    # 获取类别的中文显示名称，未匹配时默认为"长期记忆"
+
     category_name = CATEGORY_NAMES.get(
         category,
         "长期记忆",
     )
 
-    # 第三步：根据查询结果生成自然语言回复
+
     if not memories:
-        # 无记忆时告知用户尚未保存
+
         answer = f"我还没有保存你的{category_name}。"
     else:
-        # 有记忆时将内容编号并拼接展示
+
         memory_text = "\n".join(
             f"{index}. {memory['content']}"
             for index, memory in enumerate(

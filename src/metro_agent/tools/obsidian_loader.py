@@ -12,31 +12,31 @@ from typing import Any
 
 from llama_index.core import Document
 
-# yaml 为可选依赖：若已安装则用 PyYAML 解析 frontmatter，否则回退到手动解析
+
 try:
     import yaml
 except ImportError:  # pragma: no cover - optional dependency fallback
     yaml = None
 
 
-# ---------------------------------------------------------------------------
-# 加载时默认排除的系统/元文件
-# ---------------------------------------------------------------------------
+
+
+
 EXCLUDED_FILE_NAMES = {
-    "LLM Wiki.md",  # LLM 生成的汇总页面
-    "index.md",     # 索引页面
-    "log.md",       # 日志页面
+    "LLM Wiki.md",
+    "index.md",
+    "log.md",
 }
 
-# ---------------------------------------------------------------------------
-# 用于识别文档类型的 frontmatter 标签集合
-# ---------------------------------------------------------------------------
+
+
+
 DOC_TYPE_TAGS = {
-    "concept",         # 概念型文档
-    "entity",          # 实体型文档
-    "source-summary",  # 源材料摘要
-    "system",          # 系统级页面（通常被过滤）
-    "meta",            # 元信息页面
+    "concept",
+    "entity",
+    "source-summary",
+    "system",
+    "meta",
 }
 
 
@@ -49,7 +49,7 @@ def _parse_inline_list(value: str) -> list[str]:
         - 空方括号 "[]" → 返回空列表
     """
     value = value.strip()
-    # 不以方括号包裹的值视为单个标量
+
     if not value.startswith("[") or not value.endswith("]"):
         return [value.strip("\"'")]
 
@@ -75,40 +75,40 @@ def _parse_frontmatter_fallback(frontmatter: str) -> dict[str, Any]:
         - 空行和 # 开头的注释行会被跳过
     """
     metadata: dict[str, Any] = {}
-    current_key = ""  # 跟踪当前正在填充列表的键名
+    current_key = ""
 
     for raw_line in frontmatter.splitlines():
         line = raw_line.rstrip()
         stripped = line.strip()
-        # 跳过空行和注释行
+
         if not stripped or stripped.startswith("#"):
             continue
 
-        # 以 "- " 开头的行：追加到当前键对应的列表中
+
         if stripped.startswith("- ") and current_key:
             metadata.setdefault(current_key, [])
             if isinstance(metadata[current_key], list):
                 metadata[current_key].append(stripped[2:].strip().strip("\"'"))
             continue
 
-        # 不含 ":" 的行跳过
+
         if ":" not in stripped:
             continue
 
-        # 解析 "key: value" 对
+
         key, value = stripped.split(":", 1)
         key = key.strip()
         value = value.strip()
         current_key = key
 
         if not value:
-            # value 为空 → 初始化为空列表，等待后续 "- item" 行填充
+
             metadata[key] = []
         elif value.startswith("[") and value.endswith("]"):
-            # 内联列表格式
+
             metadata[key] = _parse_inline_list(value)
         else:
-            # 普通标量值，去除首尾引号
+
             metadata[key] = value.strip("\"'")
 
     return metadata
@@ -133,7 +133,7 @@ def split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     frontmatter = parts[1]
     body = parts[2].strip()
 
-    # 优先使用 PyYAML 解析，失败或不可用时回退
+
     if yaml is not None:
         parsed = yaml.safe_load(frontmatter) or {}
         if isinstance(parsed, dict):
@@ -164,10 +164,10 @@ def normalize_wikilinks(text: str) -> tuple[str, list[str]]:
             links.append(page)
         return label or page
 
-    # 先处理嵌入链接 ![[...]]，再处理普通链接 [[...]]，避免误匹配
+
     normalized = re.sub(r"!\[\[([^\]]+)\]\]", replace, text)
     normalized = re.sub(r"\[\[([^\]]+)\]\]", replace, normalized)
-    # dict.fromkeys 用于去重并保持插入顺序
+
     return normalized, list(dict.fromkeys(links))
 
 
@@ -225,13 +225,13 @@ def build_obsidian_metadata(
     Returns:
         \u6241\u5e73\u5316\u7684\u5143\u6570\u636e\u5b57\u5178\uff0c\u6240\u6709\u503c\u5747\u53ef\u76f4\u63a5\u5b58\u5165 llama_index Document.metadata\u3002
     """
-    # \u63d0\u53d6\u6838\u5fc3\u5b57\u6bb5
+
     tags = _as_list(frontmatter.get("tags"))
     aliases = _as_list(frontmatter.get("aliases"))
     sources = _as_list(frontmatter.get("sources"))
     related = _as_list(frontmatter.get("related"))
 
-    # \u6587\u6863\u7c7b\u578b\u4f18\u5148\u4ece tags \u4e2d\u5339\u914d\u5df2\u77e5\u7c7b\u578b\uff0c\u5426\u5219\u53d6\u7b2c\u4e00\u4e2a tag
+
     doc_type = next(
         (tag for tag in tags if tag in DOC_TYPE_TAGS),
         tags[0] if tags else "unknown",
@@ -254,12 +254,12 @@ def build_obsidian_metadata(
         "knowledge_source": "obsidian",
     }
 
-    # \u4e3a\u6bcf\u4e2a tag \u751f\u6210\u72ec\u7acb\u7684\u5e03\u5c14\u6807\u8bb0\u5b57\u6bb5\uff08\u5982 tag_concept: True\uff09\uff0c\u4fbf\u4e8e\u6309\u6807\u7b7e\u8fc7\u6ee4
+
     for tag in tags:
         safe_tag = re.sub(r"[^0-9A-Za-z_\u4e00-\u9fff-]", "_", tag)
         metadata[f"tag_{safe_tag}"] = True
 
-    # \u5c06\u6240\u6709\u503c\u8f6c\u6362\u4e3a\u53ef\u5b58\u50a8\u683c\u5f0f
+
     return {
         key: _metadata_value(value)
         for key, value in metadata.items()
@@ -295,9 +295,9 @@ def load_obsidian_documents(
 
     documents: list[Document] = []
 
-    # 递归扫描所有 .md 文件，按字典序处理以保证确定性
+
     for path in sorted(root.rglob("*.md")):
-        # 跳过默认排除的系统/元文件
+
         if not include_system_pages and path.name in EXCLUDED_FILE_NAMES:
             continue
 
@@ -306,11 +306,11 @@ def load_obsidian_documents(
         normalized_body, links = normalize_wikilinks(body)
         metadata = build_obsidian_metadata(path, root, frontmatter, links)
 
-        # 二次过滤：跳过 doc_type 为 system 的页面
+
         if not include_system_pages and metadata.get("doc_type") == "system":
             continue
 
-        # 拼接页面信息头，帮助 LLM 理解文档上下文
+
         page_header = (
             f"标题: {metadata['title']}\n"
             f"类型: {metadata['doc_type']}\n"

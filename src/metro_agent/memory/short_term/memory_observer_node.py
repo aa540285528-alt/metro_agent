@@ -31,7 +31,7 @@ from metro_agent.state import MetroAgentState
 from metro_agent.observability.node_instrumentation import traced_node
 
 
-# 全局分段器实例（模块级单例，复用 tiktoken 编码器）
+
 segmenter = ConversationSegmenter()
 
 
@@ -99,78 +99,78 @@ def collect_short_memory_stats(
                   }
               }
     """
-    # ---- 提取原始消息数据 ----
+
     messages = list(state.get("messages", []))
 
-    # ---- 提取已归档摘要 ----
+
     summaries = state.get("conversation_summaries", [])
 
-    # ---- 提取压缩任务字典 ----
+
     jobs = state.get("compression_jobs", {})
 
-    # ================================================================
-    # 原始消息指标
-    # ================================================================
 
-    # 使用 tiktoken cl100k_base 计算消息总 token 数
-    # 计数公式：Σ(4 + encode(content))，近似 OpenAI API 计费方式
+
+
+
+
+
     raw_tokens = segmenter.count_tokens(messages)
 
-    # ================================================================
-    # 摘要指标
-    # ================================================================
 
-    # summary_tokens：所有已归档摘要的 token 数之和
-    # 摘要中的 token_count 在 compression_result_node 中由 tiktoken 精确计算
+
+
+
+
+
     summary_tokens = sum(
         int(item.get("token_count", 0))
         for item in summaries
     )
 
-    # ================================================================
-    # 压缩管线健康指标
-    # ================================================================
 
-    # queued_jobs：status="queued" 的任务数
-    # 这些任务已写入 Redis pending 队列，等待 Worker 消费
+
+
+
+
+
     queued_jobs = sum(
         job.get("status") == "queued"
         for job in jobs.values()
     )
 
-    # failed_jobs：status="failed" 的任务数
-    # 失败原因可能是：消息完整性校验失败 / Ollama 返回空摘要 / 结果与任务不匹配
+
+
     failed_jobs = sum(
         job.get("status") == "failed"
         for job in jobs.values()
     )
 
-    # compression_status：直接从 state 读取
-    # 由 compression_result_node 在每轮应用结果时更新
+
+
     compression_status = state.get(
         "compression_status", "idle"
     )
 
-    # ================================================================
-    # 组装并返回统计结果
-    # ================================================================
+
+
+
     return {
         "short_memory_stats": {
-            # ---- 原始消息 ----
+
             "raw_message_count": len(messages),
             "raw_round_count": len(
                 segmenter.group_rounds(messages)
             ),
             "raw_tokens": raw_tokens,
 
-            # ---- 摘要 ----
+
             "summary_count": len(summaries),
             "summary_tokens": summary_tokens,
 
-            # ---- 聚合 ----
+
             "total_tokens": raw_tokens + summary_tokens,
 
-            # ---- 压缩健康 ----
+
             "queued_jobs": queued_jobs,
             "failed_jobs": failed_jobs,
             "compression_status": compression_status,

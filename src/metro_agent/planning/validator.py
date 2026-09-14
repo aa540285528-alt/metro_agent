@@ -5,11 +5,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from metro_agent.planning.models import ExecutionPlan
 from metro_agent.config import PLANNING_ALLOWED_AGENTS, PLANNING_MAX_STEPS
 """确定性代码保护 DAG 计划不乱"""
-# 4 个基础校验：
-# 不能为空计划
-# 不能超过最大步骤数
-# step_id 不能重复
-# 依赖的步骤必须存在
+
+
+
+
+
 
 def validate_plan(plan: ExecutionPlan) -> list[str]:
     errors: list[str] = []

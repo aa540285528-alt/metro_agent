@@ -18,18 +18,18 @@ CompressionDetectionNode —— 压缩任务检测节点
     → compression_node (异步消费，调 LLM 生成摘要)
 """
 
-from datetime import datetime, timezone  # 记录任务发起时间（UTC）
-from uuid import uuid4                    # 为每个压缩任务生成唯一 job_id
+from datetime import datetime, timezone
+from uuid import uuid4
 
-from metro_agent.config import SHORT_MEMORY_KEEP_ROUNDS  # 最近 N 轮不压缩（完整保留）
+from metro_agent.config import SHORT_MEMORY_KEEP_ROUNDS
 from metro_agent.memory.short_term.conversation_segmenter import (
-    ConversationSegmenter,  # 复用其 group_rounds 方法将消息按轮分组
+    ConversationSegmenter,
 )
 from metro_agent.state import MetroAgentState
 from metro_agent.observability.node_instrumentation import traced_node
 
 
-# 全局分段器实例（模块级单例）
+
 segmenter = ConversationSegmenter()
 
 
@@ -68,30 +68,30 @@ def detect_compression_jobs(
     """
     messages = list(state.get("messages", []))
 
-    # --------------------------------------------------------------
-    # 步骤 1：按轮分组
-    # --------------------------------------------------------------
+
+
+
     rounds = segmenter.group_rounds(messages)
 
-    # --------------------------------------------------------------
-    # 步骤 2-3：过滤已完成的轮次 + 提取元数据
-    # --------------------------------------------------------------
+
+
+
     completed_rounds = []
 
     for round_messages in rounds:
-        # 收集该轮中出现的所有消息类型
+
         message_types = {
             message.type
             for message in round_messages
         }
 
-        # 必须同时包含 human（用户提问）和 ai（助手回复）才算完整的一轮
-        # 当前轮可能只有 human 消息（AI 尚未回复），不能压缩
+
+
         if "human" not in message_types or "ai" not in message_types:
             continue
 
-        # 从该轮消息中提取包含 round_id 元数据的那条消息
-        # 通常是 context_node 中包装的 HumanMessage
+
+
         metadata_message = next(
             (
                 message
@@ -101,7 +101,7 @@ def detect_compression_jobs(
             None,
         )
 
-        # 无元数据的轮次无法追踪，跳过
+
         if metadata_message is None:
             continue
 
@@ -114,30 +114,30 @@ def detect_compression_jobs(
             "messages": round_messages,
         })
 
-    # --------------------------------------------------------------
-    # 步骤 4：按轮次序号升序排列（旧→新）
-    # --------------------------------------------------------------
+
+
+
     completed_rounds.sort(
         key=lambda item: item["round_number"]
     )
 
-    # --------------------------------------------------------------
-    # 步骤 5：排除最近 N 轮（SHORT_MEMORY_KEEP_ROUNDS）
-    # 最近 N 轮完整保留在 messages 中，不压缩
-    # --------------------------------------------------------------
+
+
+
+
     compressible_rounds = completed_rounds[
         :-SHORT_MEMORY_KEEP_ROUNDS
     ]
 
-    # 没有可压缩的轮次（对话还不够长）
+
     if not compressible_rounds:
         return {}
 
-    # --------------------------------------------------------------
-    # 步骤 6-7：去重 + 入队
-    # --------------------------------------------------------------
 
-    # 已生成摘要的 round_id 集合（不再重复创建任务）
+
+
+
+
     summarized_ids = {
         summary["round_id"]
         for summary in state.get(
@@ -146,33 +146,33 @@ def detect_compression_jobs(
         )
     }
 
-    # 已存在任务（pending/running/completed）的 round_id，避免重复
+
     existing_jobs = state.get("compression_jobs", {})
     new_jobs = {}
 
     for round_data in compressible_rounds:
         round_id = round_data["round_id"]
 
-        # 去重 1：已有摘要 → 跳过
+
         if round_id in summarized_ids:
             continue
 
-        # 去重 2：已有压缩任务 → 跳过
+
         if round_id in existing_jobs:
             continue
 
-        # 收集该轮中所有有 ID 的消息（用于溯源）
+
         source_message_ids = [
             message.id
             for message in round_data["messages"]
             if message.id
         ]
 
-        # 无消息 ID 的轮次无法关联原始消息，跳过
+
         if not source_message_ids:
             continue
 
-        # 创建新的压缩任务（status=pending，等待异步消费）
+
         new_jobs[round_id] = {
             "job_id": str(uuid4()),
             "round_id": round_id,
@@ -182,19 +182,19 @@ def detect_compression_jobs(
                 "compression_version",
                 0,
             ),
-            "status": "pending",              # 初始状态：等待处理
+            "status": "pending",
             "requested_at": datetime.now(
                 timezone.utc
             ).isoformat(),
         }
 
-    # 无新任务（所有可压缩轮次都已处理）
+
     if not new_jobs:
         return {}
 
-    # 有新增任务 → 写入 state，触发下游异步消费
+
     return {
         "compression_jobs": new_jobs,
-        "compression_status": "pending",  # 通知下游：有待处理任务
-        "compression_error": "",          # 清空旧错误，开始新一轮压缩周期
+        "compression_status": "pending",
+        "compression_error": "",
     }

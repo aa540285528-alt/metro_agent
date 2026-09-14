@@ -1,13 +1,21 @@
 .git
 .env
 .env.*
+!.env.example
 .venv/
 .venv-*/
+.worktrees/
 __pycache__/
 .pytest_cache/
+.pytest-*/
+.tmp-pytest/
 .ruff_cache/
+.uv-cache/
 .deepeval/
 .task3-test-artifacts/
+pytest-cache-files-*/
+pytest-task*/
+tmp-task*/
 artifacts/
 chroma_db/
 memory_chroma_db/
@@ -16,4 +24,3 @@ memory_chroma_db/
 *.log
 resumes/
 相关材料/
-

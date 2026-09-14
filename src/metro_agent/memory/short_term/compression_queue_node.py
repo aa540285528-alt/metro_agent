@@ -18,16 +18,16 @@ Redis 可靠队列，完成"检测 → 入队"的最后一环。
     2. 入队涉及 Redis 网络 I/O，失败时可在此节点统一处理错误
 """
 
-from datetime import datetime, timezone  # 记录入队时间戳
+from datetime import datetime, timezone
 
 from metro_agent.memory.short_term.compression_queue import (
-    RedisCompressionQueue,  # 可靠队列：提供 enqueue / reserve / ack / requeue
+    RedisCompressionQueue,
 )
 from metro_agent.state import MetroAgentState
 from metro_agent.observability.node_instrumentation import traced_node
 
 
-# 全局队列实例（模块级单例，复用 Redis 连接）
+
 compression_queue = RedisCompressionQueue()
 
 
@@ -73,10 +73,10 @@ def enqueue_compression_jobs(
     messages = list(state.get("messages", []))
     jobs = state.get("compression_jobs", {})
 
-    # --------------------------------------------------------------
-    # 步骤 1：筛选 status="pending" 的任务
-    # 只处理尚未入队的任务，跳过已 queued/completed/failed 的
-    # --------------------------------------------------------------
+
+
+
+
     pending_jobs = {
         round_id: job
         for round_id, job in jobs.items()
@@ -86,11 +86,11 @@ def enqueue_compression_jobs(
     if not pending_jobs:
         return {}
 
-    # --------------------------------------------------------------
-    # 步骤 2：按 round_id 建立消息索引
-    # 遍历所有消息，将同一 round_id 的消息归为一组，
-    # 后续按轮次提取时 O(1) 查找
-    # --------------------------------------------------------------
+
+
+
+
+
     messages_by_round: dict[str, list] = {}
 
     for message in messages:
@@ -104,27 +104,27 @@ def enqueue_compression_jobs(
                 [],
             ).append(message)
 
-    # --------------------------------------------------------------
-    # 步骤 3-5：逐任务校验 + 入队
-    # --------------------------------------------------------------
+
+
+
     job_updates = {}
     errors = []
 
     for round_id, job in pending_jobs.items():
-        # 从按轮次索引的消息中提取该轮的所有消息
+
         round_messages = messages_by_round.get(
             round_id,
             [],
         )
 
-        # ----------------------------------------------------------
-        # 步骤 3：消息完整性校验
-        # detection_node 记录的 source_message_ids 是创建任务时的
-        # 消息快照，必须与当前 messages 中的实际消息 ID 完全一致。
-        # 不一致的可能原因：
-        #   - 消息历史在检测后被截断（context_builder 限制了轮数）
-        #   - Redis checkpoint 恢复后消息 ID 变化
-        # ----------------------------------------------------------
+
+
+
+
+
+
+
+
         expected_ids = set(
             job.get("source_message_ids", [])
         )
@@ -144,12 +144,12 @@ def enqueue_compression_jobs(
             errors.append(f"{round_id}: {error}")
             continue
 
-        # ----------------------------------------------------------
-        # 步骤 4：写入 Redis 可靠队列
-        # enqueue 内部：
-        #   1. 将原始消息存入 SOURCE_PREFIX key（带 TTL）
-        #   2. 将任务载荷 LPUSH 到 pending 队列
-        # ----------------------------------------------------------
+
+
+
+
+
+
         try:
             source_ref = compression_queue.enqueue(
                 thread_id=thread_id,
@@ -157,18 +157,18 @@ def enqueue_compression_jobs(
                 messages=round_messages,
             )
 
-            # 入队成功 → 更新状态为 queued
+
             job_updates[round_id] = {
                 "status": "queued",
-                "source_ref": source_ref,     # Redis key，Worker 据此加载原始消息
+                "source_ref": source_ref,
                 "queued_at": datetime.now(
                     timezone.utc
                 ).isoformat(),
-                "error": "",                  # 清空之前的错误
+                "error": "",
             }
 
         except Exception as exc:
-            # Redis 写入失败（网络故障、内存不足等）→ 标记失败
+
             error = str(exc)
 
             job_updates[round_id] = {
@@ -180,9 +180,9 @@ def enqueue_compression_jobs(
     if not job_updates:
         return {}
 
-    # --------------------------------------------------------------
-    # 判断整体状态：至少一个成功 → queued，全部失败 → error
-    # --------------------------------------------------------------
+
+
+
     has_queued_job = any(
         update.get("status") == "queued"
         for update in job_updates.values()

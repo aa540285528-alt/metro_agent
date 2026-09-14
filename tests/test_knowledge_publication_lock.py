@@ -67,7 +67,7 @@ def test_synchronous_prepublication_renewal_rejects_a_lost_lease_race() -> None:
     redis = _Redis()
     lock = PublicationLock(redis, "knowledge:publication")
     lock.acquire()
-    redis.values.clear()  # Lease expires after a successful earlier heartbeat.
+    redis.values.clear()
 
     with pytest.raises(PublicationLockError, match="renew"):
         lock.assert_held()

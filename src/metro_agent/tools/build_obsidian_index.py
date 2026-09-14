@@ -316,8 +316,8 @@ def parse_args(arguments: list[str] | None = None) -> argparse.Namespace:
 
 
 def main() -> int:
-    # Keep the legacy module address operational while exposing no unsafe
-    # command surface: all process execution goes through the governed CLI.
+
+
     from metro_agent.tools.knowledge_indexer import main as governed_main
 
     return governed_main()

@@ -144,7 +144,7 @@ def _run_case(
 
 def _load_live_search() -> Callable[[str], Mapping[str, Any]]:
     """Delay model imports until a caller actually starts a live RAG run."""
-    # config.py loads the workspace .env before LlamaIndex reads DeepSeek credentials.
+
     import config  # noqa: F401
     from metro_agent.tools.Knowledge_RAGtools import build_rag_search
 

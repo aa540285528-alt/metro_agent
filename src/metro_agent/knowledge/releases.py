@@ -59,7 +59,7 @@ def create_validated_release(
         with target.open("xb") as handle:
             handle.write(content)
     except Exception:
-        # The parent is retained as evidence of a failed creation; never overwrite it.
+
         raise
     return _release_from_payload(target, payload, content)
 

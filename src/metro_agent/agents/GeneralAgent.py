@@ -5,7 +5,7 @@ from metro_agent.memory.short_term.agent_context_assembler import AgentContextAs
 from metro_agent.state import MetroAgentState
 from metro_agent.observability.agent_usage import LLM_USAGE_RECORDS_KEY, capture_response_usages
 from metro_agent.safety_policy import safety_refusal_response
-# from metro_agent.skills.skill_runtime import build_skill_context
+
 
 _general_agent_llm = None
 
@@ -34,11 +34,11 @@ general_context_assembler = AgentContextAssembler(
     agent_name="general"
 )
 
-# skill_context = build_skill_context(
-#     llm=general_agent_LLM,
-#     agent_name="general",
-#     user_input=state["user_input"],
-# )
+
+
+
+
+
 
 def general_agent(state: MetroAgentState) -> dict:
     safety_response = safety_refusal_response(state["user_input"])
@@ -75,12 +75,12 @@ def general_agent(state: MetroAgentState) -> dict:
         SystemMessage(content=GENERAL_AGENT_PROMPT),
         *history_messages,
     ]
-    # if skill_context:
-    #     messages.append(
-    #     SystemMessage(
-    #         content=f"以下是本轮需要遵守的 Skill 上下文：\n\n{skill_context}"
-    #     )
-    # )
+
+
+
+
+
+
 
     response = get_general_agent_llm().invoke(messages)
 

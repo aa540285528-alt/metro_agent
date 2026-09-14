@@ -220,7 +220,7 @@ class LoginRateLimiter:
             self._remove_token(("username", lease.username_bucket), lease.token)
             self._remove_token(("ip", lease.ip_bucket), lease.token)
 
-    # Compatibility helpers for direct callers; HTTP login uses the lease API above.
+
     def is_blocked(self, username: object, client_ip: str | None) -> bool:
         return self.retry_after(username, client_ip) > 0
 

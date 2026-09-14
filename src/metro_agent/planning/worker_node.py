@@ -37,7 +37,7 @@ def run_step_with_timeout(state: MetroAgentState, step: PlanStep) -> dict:
             f"步骤 {step.step_id} 超过 {timeout_seconds} 秒未完成"
         ) from exc
     finally:
-        # 运行中的同步调用无法被 Python 强制终止；不等待它，避免阻塞图执行。
+
         executor.shutdown(wait=False, cancel_futures=True)
 
 

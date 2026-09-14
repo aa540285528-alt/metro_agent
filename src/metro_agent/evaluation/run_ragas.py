@@ -161,7 +161,7 @@ class NativeRagasBackend:
                 LLMContextPrecisionWithReference,
                 ResponseRelevancy,
             )
-        except Exception as error:  # optional dependency may have an incomplete extra
+        except Exception as error:
             raise RagasDependencyError(f"RAGAS runtime unavailable: {type(error).__name__}") from error
 
         try:
@@ -170,7 +170,7 @@ class NativeRagasBackend:
                 ContextRecall(name="context_recall"),
                 ContextEntityRecall(name="context_entity_recall"),
                 Faithfulness(name="faithfulness"),
-                # Keep this judge-only so an embedding service is not silently chosen.
+
                 AnswerCorrectness(
                     name="answer_correctness", weights=ANSWER_CORRECTNESS_WEIGHTS
                 ),

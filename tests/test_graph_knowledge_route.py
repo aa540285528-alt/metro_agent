@@ -4,8 +4,8 @@ from typing import Any
 
 import tiktoken
 
-# Unit graph execution must not download the optional tokenizer artifact.
-# The graph test exercises routing/planning, not token accounting.
+
+
 class _OfflineEncoding:
     def encode(self, text: str) -> list[int]:
         return [0] * len(text)
@@ -40,8 +40,8 @@ def test_explicit_knowledge_request_runs_the_validated_plan_and_returns_retrieva
             }
         }
 
-    # The integration test executes the real plan/validator/scheduler/worker/
-    # aggregation chain while replacing unrelated persistence side effects.
+
+
     for name in (
         "apply_compression_results",
         "prune_short_memory",

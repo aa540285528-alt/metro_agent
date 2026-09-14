@@ -1,7 +1,6 @@
 #!/bin/sh
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
-# Run governed knowledge publication commands as an effective root operator.
 set -eu
 
 if [ "$(/usr/bin/id -u)" -ne 0 ]; then

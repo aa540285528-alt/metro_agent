@@ -70,9 +70,9 @@ class PublicationLock:
             raise self._renewal_error
         if not self._held:
             raise PublicationLockError("publication lock is not held")
-        # A local ownership flag is stale as soon as the Redis lease expires.
-        # Renew synchronously at the publication boundary, not merely on the
-        # background heartbeat cadence.
+
+
+
         self._compare_and_apply(RENEW_SCRIPT, self.ttl_seconds * 1000, "renew")
 
     def release(self) -> None:

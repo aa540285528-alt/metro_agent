@@ -89,8 +89,6 @@ compose exec -T postgres \
 
 compose run --rm --no-deps -v "$BACKUP_DIR:/backup" app python -c \
   "import tarfile; a=tarfile.open('/backup/memory-chroma.tar.gz','w:gz'); a.add('/var/lib/metro-agent/memory-chroma/current',arcname='current'); a.close()"
-# Keep one token-checked publication lease while archiving both roots.  Chroma
-# is already stopped, so this is an immutable release-unit snapshot.
 verify_publication_lock
 compose --profile knowledge-backup run --rm --no-deps -v "$BACKUP_DIR:/backup" \
   knowledge-backup python -c \

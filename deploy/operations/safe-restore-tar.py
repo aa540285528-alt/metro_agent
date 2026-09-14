@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 """Validate backup tarballs before restoring a governed volume.
 
 The backup directory is an external trust boundary.  This utility deliberately
@@ -36,10 +36,10 @@ def _validate_members(archive: Path, expected_root: str) -> list[tarfile.TarInfo
             raise UnsafeArchiveError(f"unsafe archive member: {name!r}")
         if not path.parts or path.parts[0] in {"", "."}:
             raise UnsafeArchiveError(f"unsafe archive member: {name!r}")
-        # ``TarInfo.isdev`` covers character, block, and FIFO entries.  The
-        # positive type check also rejects less common tar records (PAX/global
-        # metadata, hard links, and GNU extensions) instead of depending on
-        # their individual predicates.
+
+
+
+
         if (
             member.issym()
             or member.islnk()
@@ -61,7 +61,7 @@ def _extract_validated(archive: Path, destination: Path, expected_root: str) -> 
     stage = Path(tempfile.mkdtemp(prefix=".restore-", dir=destination))
     try:
         with tarfile.open(archive, "r:*") as contents:
-            # Validation above has examined every member before extractall.
+
             contents.extractall(stage, filter="data")
     except (OSError, tarfile.TarError) as exc:
         shutil.rmtree(stage, ignore_errors=True)
@@ -119,8 +119,8 @@ def replace_volume_contents(archive: Path, destination: Path, expected_root: str
             os.replace(entry, target)
             installed.append(target)
     except Exception:
-        # ``os.replace`` keeps every moved old entry in the same volume. Put
-        # it back if an unexpected filesystem failure interrupts the switch.
+
+
         for target in reversed(installed):
             if target.exists() or target.is_symlink():
                 os.replace(target, staged_root / target.name)

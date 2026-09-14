@@ -238,10 +238,10 @@ def trace_finalize_node(
         if recorder is None:
             raise RuntimeError("trace recorder is unavailable")
 
-        # Finish before deriving output metrics so the recorder's monotonic clock and
-        # LLM usage snapshot are the authoritative end-to-end values. A failed
-        # persistence attempt still leaves that snapshot available for a local
-        # recovery artifact.
+
+
+
+
         finish_persisted = active_registry.finish(trace_id, _terminal_status(state))
         recorder_snapshot = recorder.final_summary
         if not recorder_snapshot:

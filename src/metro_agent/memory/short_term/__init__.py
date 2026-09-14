@@ -53,9 +53,9 @@ token 预算分配、对话压缩（摘要生成）和状态裁剪。
     redis_checkpointer.py          — Redis Checkpoint 持久化
 """
 
-# ============================================================
-# 上下文构建
-# ============================================================
+
+
+
 from metro_agent.memory.short_term.context_node import (
     build_conversation_context,
     get_next_round_number,
@@ -66,21 +66,21 @@ from metro_agent.memory.short_term.agent_context_budget_manager import AgentCont
 from metro_agent.memory.short_term.conversation_segmenter import ConversationSegmenter
 from metro_agent.memory.short_term.tool_context_builder import ToolContextBuilder
 
-# ============================================================
-# 响应记录
-# ============================================================
+
+
+
 from metro_agent.memory.short_term.response_node import record_assistant_message
 
-# ============================================================
-# 压缩管线 — 节点
-# ============================================================
+
+
+
 from metro_agent.memory.short_term.compression_detection_node import detect_compression_jobs
 from metro_agent.memory.short_term.compression_queue_node import enqueue_compression_jobs
 from metro_agent.memory.short_term.compression_result_node import apply_compression_results
 
-# ============================================================
-# 压缩管线 — 基础设施
-# ============================================================
+
+
+
 from metro_agent.memory.short_term.compression_queue import (
     RedisCompressionQueue,
     ReservedCompressionJob,
@@ -88,18 +88,18 @@ from metro_agent.memory.short_term.compression_queue import (
 from metro_agent.memory.short_term.compression_worker import run_worker
 from metro_agent.memory.short_term.round_summarizer import RoundConversationSummarizer
 
-# ============================================================
-# 运维
-# ============================================================
+
+
+
 from metro_agent.memory.short_term.state_memory_pruner import prune_short_memory
 from metro_agent.memory.short_term.memory_observer_node import collect_short_memory_stats
 from metro_agent.memory.short_term.redis_checkpointer import build_redis_checkpointer
 
-# ============================================================
-# 公开 API
-# ============================================================
+
+
+
 __all__ = [
-    # —— 上下文构建 ——
+
     "build_conversation_context",
     "get_next_round_number",
     "ConversationContextBuilder",
@@ -107,18 +107,18 @@ __all__ = [
     "AgentContextBudgetManager",
     "ConversationSegmenter",
     "ToolContextBuilder",
-    # —— 响应记录 ——
+
     "record_assistant_message",
-    # —— 压缩管线节点 ——
+
     "detect_compression_jobs",
     "enqueue_compression_jobs",
     "apply_compression_results",
-    # —— 压缩管线基础设施 ——
+
     "RedisCompressionQueue",
     "ReservedCompressionJob",
     "run_worker",
     "RoundConversationSummarizer",
-    # —— 运维 ——
+
     "prune_short_memory",
     "collect_short_memory_stats",
     "build_redis_checkpointer",

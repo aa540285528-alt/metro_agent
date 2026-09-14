@@ -23,7 +23,7 @@
 import sys
 from pathlib import Path
 
-# 确保能导入同级的 memory_system 模块
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dataclasses import dataclass
@@ -31,35 +31,35 @@ from typing import Literal
 from metro_agent.memory.long_term.models import MemoryCandidate
 
 
-# ============================================================
-# 记忆操作类型
-# 每个候选项经过 evaluate_memory 后会被标记为以下四种之一
-# ============================================================
+
+
+
+
 MemoryAction = Literal[
-    "auto_save",          # 自动保存：无冲突、无敏感的正常记忆，直接写入
-    "ask_confirmation",   # 待确认：含敏感信息或存在冲突，需用户确认后处理
-    "ignore",             # 忽略：临时状态或语义重复，不进入长期记忆
-    "route_rule_change",  # 路由规则修改：用户要求修改系统规则文件，走专门流程
+    "auto_save",
+    "ask_confirmation",
+    "ignore",
+    "route_rule_change",
 ]
 
 
-# ============================================================
-# 策略决策结果
-# ============================================================
+
+
+
 @dataclass(frozen=True)
 class PolicyDecision:
     """策略裁决结果，不可变"""
 
-    action: MemoryAction  # 建议执行的操作
-    reason: str           # 裁决理由（便于日志记录和调试）
+    action: MemoryAction
+    reason: str
 
 
-# ============================================================
-# 关键词词典
-# 基于关键词匹配做快速分流，避免不必要的 LLM 调用
-# ============================================================
 
-# ---- 时间性词汇（配合状态类词汇，构成"当前告警"等临时信号） ----
+
+
+
+
+
 TRANSIENT_TIME_WORDS = (
     "当前",
     "实时",
@@ -67,7 +67,7 @@ TRANSIENT_TIME_WORDS = (
     "此刻",
 )
 
-# ---- 临时状态词汇（告警、设备状态等不跨会话复用） ----
+
 TRANSIENT_STATE_WORDS = (
     "告警",
     "设备状态",
@@ -76,7 +76,7 @@ TRANSIENT_STATE_WORDS = (
     "在线状态",
 )
 
-# ---- 规则修改动作词 ----
+
 RULE_ACTION_WORDS = (
     "写入",
     "添加",
@@ -85,14 +85,14 @@ RULE_ACTION_WORDS = (
     "删除",
 )
 
-# ---- 规则修改目标词（需与动作词同时命中才触发） ----
+
 RULE_TARGET_WORDS = (
     "规则",
     "规则文件",
     "Metro_Agent_Rules.md",
 )
 
-# ---- 敏感信息关键词 ----
+
 SENSITIVE_WORDS = (
     "员工编号",
     "工号",
@@ -113,10 +113,10 @@ SENSITIVE_WORDS = (
 )
 
 
-# ============================================================
-# 辅助判断函数
-# 每个函数独立判断一种场景，可单独测试
-# ============================================================
+
+
+
+
 
 def is_rule_change_request(user_text: str) -> bool:
     """
@@ -145,8 +145,8 @@ def is_transient_memory(text: str) -> bool:
 
 
 def is_sensitive_memory(
-    text: str,                # 拼接后的文本（user_text + candidate.content）
-    candidate: MemoryCandidate,  # 候选记忆对象
+    text: str,
+    candidate: MemoryCandidate,
 ) -> bool:
     """
     检测记忆是否包含敏感信息。
@@ -160,14 +160,14 @@ def is_sensitive_memory(
     return any(word.lower() in text.lower() for word in SENSITIVE_WORDS)
 
 
-# ============================================================
-# 记忆评估函数（核心策略引擎）
-# ============================================================
+
+
+
 def evaluate_memory(
     *,
-    user_text: str,                 # 用户原始输入
-    candidate: MemoryCandidate,     # 候选记忆（来自 Curator 提取）
-    relation: str | None = None,    # 冲突检测结果（来自 ConflictDetector），无则为 None
+    user_text: str,
+    candidate: MemoryCandidate,
+    relation: str | None = None,
 ) -> PolicyDecision:
     """
     对单条候选记忆进行策略裁决。
@@ -185,45 +185,45 @@ def evaluate_memory(
       candidate:  从对话中提取的记忆候选项
       relation:   与已有记忆的关系，由 conflict_detector.detect_conflict() 返回
     """
-    # 拼接用于关键词匹配的文本（扩大检测范围）
+
     combined_text = f"{user_text}\n{candidate.content}"
 
-    # 规则 1：规则修改请求（仅检测 user_text，不含 candidate），不带relation，用来做初筛
+
     if is_rule_change_request(user_text):
         return PolicyDecision(
             action="route_rule_change",
             reason="检测到规则修改请求，必须由用户确认后处理",
         )
 
-    # 规则 2：临时状态（如"当前告警"），不带relation，用来做初筛
+
     if is_transient_memory(combined_text):
         return PolicyDecision(
             action="ignore",
             reason="当前告警或临时状态不进入长期记忆",
         )
 
-    # 规则 3：敏感信息，不带relation，用来做初筛
+
     if is_sensitive_memory(combined_text, candidate):
         return PolicyDecision(
             action="ask_confirmation",
             reason="记忆包含敏感信息，需要用户确认",
         )
 
-    # 规则 4：语义重复 → 忽略，带上relation，用来做复测
+
     if relation == "duplicate":
         return PolicyDecision(
             action="ignore",
             reason="已有语义重复的长期记忆",
         )
 
-    # 规则 5：替换或冲突 → 需用户确认，带上relation，用来做复测
+
     if relation in {"replace", "conflict"}:
         return PolicyDecision(
             action="ask_confirmation",
             reason="新记忆可能替换或冲突已有记忆",
         )
 
-    # 规则 6：默认 → 自动保存
+
     return PolicyDecision(
         action="auto_save",
         reason="普通且无冲突的长期记忆",

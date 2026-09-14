@@ -291,8 +291,6 @@ services:
         condition: service_started
     restart: "no"
 
-  # The only service with a non-internal network.  Squid's versioned allowlist
-  # is mounted read-only; app has no route to the Internet except this proxy.
   egress-gateway:
     image: ubuntu/squid:6.6-24.04_beta
     command: ["squid", "-N", "-f", "/etc/squid/squid.conf"]

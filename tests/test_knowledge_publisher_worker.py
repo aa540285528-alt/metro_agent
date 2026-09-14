@@ -667,8 +667,8 @@ def test_fixed_jobs_validate_publish_rollback_and_get_status_run_in_python_only(
         )
 
         validate_result = service.process_job(repo.jobs["job-validate"])
-        # Production reaches this state atomically when the administrator queues
-        # the already validated draft for publication through the API.
+
+
         repo.drafts["draft-123"].status = "publishing"
         publish_result = service.process_job(repo.jobs["job-publish"])
         rollback_result = service.process_job(repo.jobs["job-rollback"])

@@ -10,9 +10,9 @@ class KnowledgeIndexUnavailableError(RuntimeError):
 
 
 def read_published_collection_name(client, registry_name: str) -> str:
-    # New publications use a descriptor-bound, atomic pointer.  Retain the
-    # legacy record shape only so historical registries remain readable until
-    # they are replaced by their next governed publication.
+
+
+
     pointer = read_release_pointer(client, required=False)
     if pointer is not None:
         return pointer.current_collection_name

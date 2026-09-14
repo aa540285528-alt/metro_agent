@@ -13,7 +13,7 @@ import json
 import sys
 from pathlib import Path
 
-# 将项目根目录加入 sys.path，以便导入 config 等模块
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -23,7 +23,7 @@ from metro_agent.config import SKILL_SELECTOR_PROMPT, build_Chat_QwenLLM
 
 SKILL_ROOT = Path(__file__).resolve().parent
 
-# 解析skill.md文件
+
 def parse_frontmatter(text: str) -> tuple[dict, str]:
     if not text.startswith("---"):
         return {}, text
@@ -47,10 +47,10 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
 
     return data, body
 
-# 找到对应agent下的skill.md文件，读取name、description、path并按对应格式返回skill cards
-# 比如 agents/GeneralAgent/skills/SKILL.md
-# 返回格式：
-# [{"name": "fault-analysis-report", "description": "description", "path": "path"}...]
+
+
+
+
 def discover_skills(agent_name: str) -> list[dict]:
     agent_skill_dir = SKILL_ROOT / agent_name
 
@@ -77,7 +77,7 @@ def discover_skills(agent_name: str) -> list[dict]:
 
     return skills
 
-# 把用户输入+skill cards传给llm，返回llm需要加载哪些skill
+
 def select_skills_with_llm(llm, user_input: str, skill_cards: list[dict]) -> list[dict]:
     if not skill_cards:
         return []

@@ -40,12 +40,12 @@ Send 机制简介（LangGraph 官方并行原语）：
 import sys
 from pathlib import Path
 
-# 将项目根目录加入 sys.path，以便导入顶层模块
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from langgraph.types import Send  # LangGraph 并行派发原语
+from langgraph.types import Send
 from metro_agent.planning.models import ExecutionPlan, StepResult
-from metro_agent.planning.scheduler import get_ready_steps  # 找出所有依赖已满足的步骤
+from metro_agent.planning.scheduler import get_ready_steps
 from metro_agent.state import MetroAgentState
 
 
@@ -88,69 +88,69 @@ def route_ready_steps(state: MetroAgentState):
           - Send 列表：有 ready steps，并行派发
           - 字符串 "planning_aggregate_node"：本轮没有可执行的步骤
     """
-    # --------------------------------------------------------------
-    # 步骤 1：从 state 反序列化计划与已完成结果
-    # --------------------------------------------------------------
+
+
+
 
     plan_data = state.get("execution_plan", {})
     result_data = state.get("plan_results", {})
 
-    # dict → ExecutionPlan Pydantic 对象
+
     plan = ExecutionPlan(**plan_data)
 
-    # dict[str, dict] → dict[str, StepResult]
-    # 将每个已完成步骤的结果反序列化为 StepResult 对象，
-    # 以便 scheduler 通过 result.status 判断是否 success
+
+
+
     results = {
         step_id: StepResult(**result)
         for step_id, result in result_data.items()
     }
 
-    # --------------------------------------------------------------
-    # 步骤 2：调用 scheduler 找出所有 ready steps
-    #
-    # get_ready_steps() 内部逻辑（见 scheduler.py）：
-    #   1. 收集所有 status="success" 的 step_id
-    #   2. 遍历 plan.steps，跳过非 pending 状态的
-    #   3. 检查 pending 步骤的 dependencies 是否全部在 success 集合中
-    #   4. 满足者标记为 "ready" 并返回
-    #
-    # 副作用：被标记为 ready 的 PlanStep 的 status 会被原地修改为 "ready"
-    # --------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
     ready_steps = get_ready_steps(
         plan=plan,
         results=results,
     )
 
-    # --------------------------------------------------------------
-    # 步骤 3：路由决策 —— 有就绪步骤则并行派发，否则进入聚合
-    # --------------------------------------------------------------
 
-    # 情况 1：无 ready steps（所有 pending 步骤都有未完成的依赖，
-    #         或者所有步骤已执行完毕）
+
+
+
+
+
     if not ready_steps:
-        # 直接返回目标节点名称字符串，告诉 LangGraph 跳过 worker，
-        # 进入结果汇总阶段
+
+
         return "planning_aggregate_node"
 
-    # 情况 2：有 ready steps → 为每个 ready step 构造一个 Send
-    #
-    # Send 的参数：
-    #   第一个参数 "planning_worker_node"：目标节点名称
-    #   第二个参数 dict：传递给目标节点的 state
-    #     - **state 展开当前完整上下文（user_input、messages 等）
-    #     - current_plan_step：该 worker 专属的 PlanStep（序列化为 dict）
-    #
-    # 每个 worker_node 收到 Send 后，从 state["current_plan_step"]
-    # 读取自己要执行的步骤信息（step_id、agent、description 等），
-    # 然后调用对应的 Agent 执行。
+
+
+
+
+
+
+
+
+
+
+
     return [
         Send(
             "planning_worker_node",
             {
-                # 展开当前 state 的全部字段（继承上下文）
+
                 **state,
-                # 注入本次执行的步骤信息（worker_node 据此知道要做什么）
+
                 "current_plan_step": step.model_dump(mode="json"),
             },
         )

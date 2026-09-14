@@ -29,11 +29,11 @@ state 字段按功能分为 7 组：
   7. 可观测性          —— 运行时统计 + 预算分配账单
 """
 
-import operator  # operator.or_ 用作 dict 合并的 reducer（取并集）
+import operator
 from typing import Annotated, Any, TypedDict
 
-from langchain_core.messages import BaseMessage  # LangChain 消息基类
-from langgraph.graph.message import add_messages  # LangGraph 内置：将新消息追加到消息列表末尾
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 
 
 def merge_evaluation_retrieval_contexts(
@@ -43,9 +43,9 @@ def merge_evaluation_retrieval_contexts(
     return list(dict.fromkeys(value for value in values if isinstance(value, str) and value.strip()))
 
 
-# ======================================================================
-# 对话摘要 & 压缩任务数据结构
-# ======================================================================
+
+
+
 
 class ConversationSummary(TypedDict, total=False):
     """单轮对话的压缩摘要记录。
@@ -62,13 +62,13 @@ class ConversationSummary(TypedDict, total=False):
       以 ConversationSummary 形式保留在 conversation_summaries 中。
       召回时摘要优先（信息密度高），未生成摘要的轮次用原文兜底。
     """
-    round_id: str               # 轮次唯一标识（UUID），与对应 HumanMessage.additional_kwargs["round_id"] 一致
-    round_number: int           # 轮次序号，从 1 开始递增，用于排序还原时间线
-    summary: str                # 该轮对话的压缩摘要文本（≤120 字，由 Ollama Qwen2.5 7B 生成）
-    source_message_ids: list[str]  # 被摘要覆盖的原始消息 ID 列表，用于溯源和完整性校验
-    source_ref: str             # Redis 归档引用键（metro:compression:source:{thread_id}:{round_id}），可据此取回原始消息
-    token_count: int            # 摘要的精确 token 数（tiktoken cl100k_base 编码计数）
-    created_at: str             # 摘要生成时间（ISO 8601 UTC）
+    round_id: str
+    round_number: int
+    summary: str
+    source_message_ids: list[str]
+    source_ref: str
+    token_count: int
+    created_at: str
 
 
 class CompressionJob(TypedDict, total=False):
@@ -81,24 +81,24 @@ class CompressionJob(TypedDict, total=False):
     任务状态机：
       pending → queued → (Worker 消费) → completed/failed → applied
     """
-    job_id: str                 # 压缩任务唯一标识（UUID），贯穿整个生命周期
-    round_id: str               # 被压缩的对话轮次 ID，与 CompressionJob key 相同（冗余用于校验）
-    round_number: int           # 被压缩的轮次序号
-    source_message_ids: list[str]  # 被压缩覆盖的原始消息 ID 列表，用于入队时的完整性校验
-    base_summary_version: int   # 压缩所基于的摘要版本号（创建任务时的 compression_version 快照）
-    status: str                 # 任务状态：pending → queued → completed/failed → applied
-    result_summary: str         # 压缩完成后生成的摘要文本（仅在 applied 后有值）
-    source_ref: str             # Redis 原始消息存储键，Worker 通过它 load_source() 加载消息
-    error: str                  # 失败时的错误信息（LLM 超时 / 消息不完整 / 结果校验失败 等）
-    requested_at: str           # 任务创建时间（detection_node 创建 job 时的 ISO 8601 UTC）
-    queued_at: str              # 任务入队时间（queue_node 写入 Redis 时的 ISO 8601 UTC）
-    completed_at: str           # Worker 完成压缩的时间（result 中的 ISO 8601 UTC）
-    applied_at: str             # 结果应用时间（result_node 将摘要写入 state 时的 ISO 8601 UTC）
+    job_id: str
+    round_id: str
+    round_number: int
+    source_message_ids: list[str]
+    base_summary_version: int
+    status: str
+    result_summary: str
+    source_ref: str
+    error: str
+    requested_at: str
+    queued_at: str
+    completed_at: str
+    applied_at: str
 
 
-# ======================================================================
-# Reducer 函数 —— 自定义 Annotated 字段的合并策略
-# ======================================================================
+
+
+
 
 def merge_conversation_summaries(
     current: list[ConversationSummary],
@@ -128,23 +128,23 @@ def merge_conversation_summaries(
     Returns:
         合并并按 round_number 升序排序后的摘要列表。
     """
-    # 以 round_id 为键建立索引，current 中的条目作为基础
+
     merged = {
         item["round_id"]: item
         for item in current
     }
 
-    # updates 中同 round_id 的条目覆盖 current 中的旧值
-    # 使用字典解包实现字段级合并：后写入的字段覆盖先写入的
-    # 例如：第一次写入只有 summary 文本，第二次写入补充 token_count
+
+
+
     for item in updates:
         round_id = item["round_id"]
         merged[round_id] = {
-            **merged.get(round_id, {}),  # 已有字段（可能不完整）
-            **item,                      # 新字段覆盖同名字段
+            **merged.get(round_id, {}),
+            **item,
         }
 
-    # 按轮次序号升序排列，保证时间线从旧到新
+
     return sorted(
         merged.values(),
         key=lambda item: item.get("round_number", 0),
@@ -179,16 +179,16 @@ def merge_compression_jobs(
 
     for round_id, update in updates.items():
         merged[round_id] = {
-            **merged.get(round_id, {}),  # 保留已有字段（如 source_message_ids）
-            **update,                     # 新值覆盖同名字段（如 status: pending→queued）
+            **merged.get(round_id, {}),
+            **update,
         }
 
     return merged
 
 
-# ======================================================================
-# MetroAgentState —— 全局状态主结构
-# ======================================================================
+
+
+
 
 class MetroAgentState(TypedDict, total=False):
     """地铁运维多 Agent 系统的全局状态。
@@ -208,9 +208,9 @@ class MetroAgentState(TypedDict, total=False):
       - 长期记忆相关字段以 memory_ 为前缀
     """
 
-    # ==================================================================
-    # 1. 身份与会话 —— 标识当前用户和对话线程
-    # ==================================================================
+
+
+
 
     user_id: str
     """用户唯一标识（如工号 "M12345"）。
@@ -232,9 +232,9 @@ class MetroAgentState(TypedDict, total=False):
     可用于会话级别的日志关联和会话终止时的清理回调。
     """
 
-    # ==================================================================
-    # 2. 短期记忆 —— 滑动窗口 + 压缩归档 + 压缩任务管线
-    # ==================================================================
+
+
+
 
     messages: Annotated[list[BaseMessage], add_messages]
     """当前对话的完整消息历史。
@@ -265,7 +265,7 @@ class MetroAgentState(TypedDict, total=False):
 
     conversation_summaries: Annotated[
         list[ConversationSummary],
-        merge_conversation_summaries,  # 自定义 reducer：按 round_id 去重合并
+        merge_conversation_summaries,
     ]
     """对话压缩摘要列表。
 
@@ -283,7 +283,7 @@ class MetroAgentState(TypedDict, total=False):
 
     compression_jobs: Annotated[
         dict[str, CompressionJob],
-        merge_compression_jobs,  # 自定义 reducer：按 round_id 字段级合并更新
+        merge_compression_jobs,
     ]
     """压缩任务跟踪字典。
 
@@ -326,9 +326,9 @@ class MetroAgentState(TypedDict, total=False):
     成功压缩时被清空为空字符串。
     """
 
-    # ==================================================================
-    # 3. 当前任务状态 —— Planning 模块的执行计划
-    # ==================================================================
+
+
+
 
     user_input: str
     """用户本轮原始输入文本（去除首尾空白后的内容）。
@@ -397,9 +397,9 @@ class MetroAgentState(TypedDict, total=False):
     value = StepResult 或该步骤的简化输出
     """
 
-    # ==================================================================
-    # 4. 当前实体 —— 从用户输入中提取的运维相关实体
-    # ==================================================================
+
+
+
 
     line: str
     """地铁线路编号，如 "1"、"3"、"11"。
@@ -452,9 +452,9 @@ class MetroAgentState(TypedDict, total=False):
       取最大值 +1。确保跨归档/未归档消息统一编号。
     """
 
-    # ==================================================================
-    # 5. 工具与 Agent 结果 —— 各 Agent 的输出汇总
-    # ==================================================================
+
+
+
 
     tool_results: Annotated[dict[str, dict[str, Any]], operator.or_]
     """工具调用记录字典（中心黑板）。
@@ -489,9 +489,9 @@ class MetroAgentState(TypedDict, total=False):
     这是 LangGraph 工作流的最终输出，并由 record_assistant_message 归档。
     """
 
-    # ==================================================================
-    # 6. 长期记忆 —— 跨会话持久化的用户信息
-    # ==================================================================
+
+
+
 
     recalled_memories: list[dict]
     """本轮对话中从 ChromaDB 召回的用户长期记忆。
@@ -548,9 +548,9 @@ class MetroAgentState(TypedDict, total=False):
     True 时整轮跳过记忆写入流程，将请求路由到专门的规则修改处理逻辑。
     """
 
-    # ==================================================================
-    # 7. 可观测性 —— 运行时统计 + 预算分配账单
-    # ==================================================================
+
+
+
 
     short_memory_stats: dict[str, Any]
     """短期记忆系统的运行时统计指标。
@@ -589,7 +589,7 @@ class MetroAgentState(TypedDict, total=False):
     trace_artifact_uri: str
     evaluation_retrieval_contexts: Annotated[list[str], merge_evaluation_retrieval_contexts]
 
-    # ==================================================================
-    # 8. 技能加载器 —— 技能执行计划
-    # ==================================================================
+
+
+
     skill_plan: dict[str, list[str]]

@@ -50,5 +50,4 @@ markers = [
 ]
 
 [tool.ruff.lint]
-# Preserve the legacy code style while CI blocks syntax and undefined-name defects.
 select = ["F"]

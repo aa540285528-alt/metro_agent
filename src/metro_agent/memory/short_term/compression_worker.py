@@ -27,13 +27,13 @@ compression_result_node 读取。
   apply_compression_results  ←───  get_result 读取摘要
 """
 
-from datetime import datetime, timezone  # 记录完成时间
+from datetime import datetime, timezone
 
 from metro_agent.memory.short_term.compression_queue import (
-    RedisCompressionQueue,  # 可靠队列：reserve / load_source / save_result / ack
+    RedisCompressionQueue,
 )
 from metro_agent.memory.short_term.round_summarizer import (
-    RoundConversationSummarizer,  # 单轮摘要器（本地 Ollama，≤100 字）
+    RoundConversationSummarizer,
 )
 
 
@@ -67,13 +67,13 @@ def run_worker() -> None:
     print("Ollama压缩Worker已启动")
 
     while True:
-        # ----------------------------------------------------------
-        # 步骤 1：阻塞预占任务（BRPOPLPUSH）
-        # 5 秒超时让循环定期醒来，检查是否需要退出
-        # ----------------------------------------------------------
+
+
+
+
         reserved_job = queue.reserve(timeout=5)
 
-        # 超时无任务 → 继续循环
+
         if reserved_job is None:
             continue
 
@@ -81,29 +81,29 @@ def run_worker() -> None:
         job_id = job["job_id"]
 
         try:
-            # ------------------------------------------------------
-            # 步骤 2：加载原始消息
-            # 通过 enqueue 时写入的 source_ref 从 Redis 读取
-            # ------------------------------------------------------
+
+
+
+
             messages = queue.load_source(
                 job["source_ref"]
             )
 
-            # ------------------------------------------------------
-            # 步骤 3：调用本地 Ollama 生成单轮摘要
-            # RoundConversationSummarizer：
-            #   - 格式化消息为 "角色:内容" 文本
-            #   - 调 Ollama Qwen2.5 7B 生成 ≤100 字摘要
-            #   - 空摘要或超长摘要 → 抛出 ValueError
-            # ------------------------------------------------------
+
+
+
+
+
+
+
             summary = summarizer.summarize(messages)
 
-            # ------------------------------------------------------
-            # 步骤 4：保存成功的压缩结果
-            # 结果包含原始 job 元数据 + status + summary + 时间戳
-            # ------------------------------------------------------
+
+
+
+
             queue.save_result(job_id, {
-                **job,                              # 继承入队时的元数据
+                **job,
                 "status": "completed",
                 "summary": summary,
                 "completed_at": datetime.now(
@@ -111,7 +111,7 @@ def run_worker() -> None:
                 ).isoformat(),
             })
 
-            # 步骤 5：确认完成，从 processing 备份队列移除
+
             queue.acknowledge(reserved_job)
 
             print(
@@ -119,13 +119,13 @@ def run_worker() -> None:
             )
 
         except Exception as exc:
-            # ------------------------------------------------------
-            # 失败处理：保存错误结果 + ack（不 requeue）
-            # 选择 ack 而非 requeue 的原因：
-            #   - 避免因持续性故障（如 Ollama 崩溃）导致无限重试
-            #   - 失败信息写入 result，主流程可感知并展示
-            #   - 如需重试，可后续手动将 failed 任务重新入队
-            # ------------------------------------------------------
+
+
+
+
+
+
+
             queue.save_result(job_id, {
                 **job,
                 "status": "failed",
@@ -135,7 +135,7 @@ def run_worker() -> None:
                 ).isoformat(),
             })
 
-            # 仍 ack（从 processing 移除），不阻塞后续任务
+
             queue.acknowledge(reserved_job)
 
             print(

@@ -9,10 +9,16 @@ src/metro_agent.egg-info/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest-*/
+.tmp-pytest/
 .ruff_cache/
 .mypy_cache/
+.uv-cache/
 .deepeval/
 .task3-test-artifacts/
+pytest-cache-files-*/
+pytest-task*/
+tmp-task*/
 artifacts/
 chroma_db/
 memory_chroma_db/

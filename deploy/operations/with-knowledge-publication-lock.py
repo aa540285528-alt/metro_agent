@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 """Run a bounded backup operation while owning the governed publication lease."""
 
 from __future__ import annotations

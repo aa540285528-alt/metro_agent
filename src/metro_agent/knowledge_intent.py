@@ -7,9 +7,9 @@ from metro_agent.safety_policy import (
 )
 
 
-# These terms map directly to the knowledge-agent contract in GENERAL_AGENT_PROMPT.
-# Keep this deliberately narrow: only this explicit route may preflight the index
-# before a conversation is claimed.
+
+
+
 _EXPLICIT_KNOWLEDGE_TERMS = (
     "知识库",
     "规程",

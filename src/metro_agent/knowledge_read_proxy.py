@@ -190,9 +190,9 @@ class KnowledgeReadProxy:
             if (method, action) != ("POST", "get"):
                 raise _RouteDenied()
             await self._current_collection(registry_uuid=registry_uuid)
-            # The registry is a control-plane collection.  Its sole readable
-            # document through this proxy is the single published pointer;
-            # never let callers enumerate any other registry records.
+
+
+
             body = _REGISTRY_RECORD_BODY
             return await self._forward(method, path, body, headers)
 
@@ -287,8 +287,8 @@ def _configured_artifact_root() -> Path:
     return artifact_root
 
 
-# Uvicorn imports this fixed deployment entry point.  The upstream remains the
-# internal Chroma service constant above and cannot be supplied by callers.
+
+
 app = create_knowledge_read_proxy(_configured_artifact_root())
 
 

@@ -26,28 +26,28 @@ from time import perf_counter
 from langchain.messages import SystemMessage
 
 from metro_agent.config import (
-    build_Ollama_qwenLLM,       # 工厂函数：创建本地 Ollama Qwen2.5 7B 连接
-    KNOWLEDGE_AGENT_PROMPT,     # 知识库系统提示词（含 {rag_context} 占位符）
-    SHORT_TERM_MEMORY_LIMIT,    # 短期记忆保留轮数（用于 RAG 查询上下文截断）
+    build_Ollama_qwenLLM,
+    KNOWLEDGE_AGENT_PROMPT,
+    SHORT_TERM_MEMORY_LIMIT,
 )
 from metro_agent.memory.short_term.agent_context_assembler import (
-    AgentContextAssembler,  # 按 Agent 预算组装对话历史上下文
+    AgentContextAssembler,
 )
 from metro_agent.tools.Knowledge_RAGtools import (
-    build_rag_search,       # RAG 检索入口：向量检索 + HyDE 查询改写 + Reranker 重排
+    build_rag_search,
 )
 from metro_agent.memory.short_term.context_builder import (
-    ConversationContextBuilder,  # 用于格式化 RAG 查询中的对话历史文本
+    ConversationContextBuilder,
 )
 from metro_agent.state import MetroAgentState
 from metro_agent.observability.finalize_node import get_trace_registry
 from metro_agent.observability.agent_usage import LLM_USAGE_RECORDS_KEY, capture_response_usages
 
-# ============================================================
-# LLM 实例与上下文构建器（模块级单例）
-# ============================================================
 
-# 本地 Ollama Qwen2.5 7B：知识库场景不需要强推理，本地模型零成本
+
+
+
+
 
 knowledge_agent_LLM= None
 
@@ -78,14 +78,14 @@ def _prefer_retrieval_answer(answer: str, retrieval_answer: object) -> str:
     ):
         return fallback
     return normalized
-# RAG 查询构建器：将最近 N 轮对话历史格式化为文本，
-# 拼入 RAG 查询以增强检索语义准确性
+
+
 knowledge_query_builder = ConversationContextBuilder(
     max_rounds=SHORT_TERM_MEMORY_LIMIT
 )
 
-# 上下文组装器：在调 LLM 生成最终答案时，按 knowledge 的 6K 预算
-# 提取对话历史（近期原文 + 旧轮摘要）
+
+
 knowledge_context_assembler = AgentContextAssembler(
     agent_name="knowledge"
 )
@@ -189,9 +189,9 @@ def record_rag_retrieval_trace(
         return
 
 
-# ============================================================
-# 知识库 Agent
-# ============================================================
+
+
+
 
 
 def knowledge_agent(state: MetroAgentState) -> dict:
@@ -242,12 +242,12 @@ def knowledge_agent(state: MetroAgentState) -> dict:
     """
     user_input = state["user_input"]
 
-    # ==============================================================
-    # 阶段 1：构建增强 RAG 查询（对话历史 + 当前问题）
-    # ==============================================================
 
-    # 排除当前轮消息：当前 HumanMessage 已在 context_node 中追加到
-    # messages，如果不排除，RAG 查询中会出现两次当前问题
+
+
+
+
+
     past_messages = [
         message
         for message in state.get("messages", [])
@@ -255,12 +255,12 @@ def knowledge_agent(state: MetroAgentState) -> dict:
         != state.get("current_round_id")
     ]
 
-    # 从过去消息中截取最近 N 轮（默认 6 轮），格式化为文本
+
     query_history = knowledge_query_builder.select_messages(
         past_messages
     )
 
-    # 有历史 → 拼入查询增强语义；无历史（首轮对话）→ 直接用原始问题
+
     if query_history:
         history_text = knowledge_query_builder.format_messages(
             query_history
@@ -272,9 +272,9 @@ def knowledge_agent(state: MetroAgentState) -> dict:
     else:
         rag_query = user_input
 
-    # ==============================================================
-    # 阶段 2：RAG 检索（向量搜索 + HyDE 改写 + Reranker 重排）
-    # ==============================================================
+
+
+
     rag_started_at = perf_counter()
     try:
         rag_result = build_rag_search(rag_query)
@@ -319,40 +319,40 @@ def knowledge_agent(state: MetroAgentState) -> dict:
             LLM_USAGE_RECORDS_KEY: [],
         }
 
-    # ==============================================================
-    # 阶段 3：解析检索结果 → 三种格式的引用信息
-    # ==============================================================
 
-    # 3a：资料片段全文 —— 每个 source 是一段从知识文档中切出的文本
-    # 注入 prompt 供 LLM 直接参考，格式："资料片段1:xxx\n\n资料片段2:xxx"
+
+
+
+
+
     source_text = "\n\n".join(
         f"资料片段{i + 1}:{source['text']}"
         for i, source in enumerate(rag_result["sources"])
     )
 
-    # 3b：引用文档名 —— 去重后的文档名列表，展示给用户
-    # 格式："通信SOP手册、故障处理规程"
+
+
     source_doc_text = (
         "、".join(rag_result["source_docs"])
         if rag_result["source_docs"]
         else "未检索到明确文档来源"
     )
 
-    # 3c：检索分数 —— Reranker 的相似度评分
-    # 同一文档可能有多个切片，取最高分（因为 Reranker 返回同一文档的多个 chunk）
+
+
     doc_scores = {}
     for source in rag_result["sources"]:
         file_name = source["file_name"]
         score = source["score"]
         if score is None:
             continue
-        # 同一文档的多个切片取最高分
+
         doc_scores[file_name] = max(
             doc_scores.get(file_name, float("-inf")),
             score,
         )
 
-    # 格式化为可读的分数列表，供内部检索质量调试。
+
     source_score = "\n".join(
         f"{i + 1}. {source['file_name']}: "
         f"{source['score']:.4f}"
@@ -360,55 +360,55 @@ def knowledge_agent(state: MetroAgentState) -> dict:
         if source["score"] is not None
     )
 
-    # ==============================================================
-    # 阶段 4：预算分配 —— 计算 RAG 上下文消耗 + 请求配额
-    # ==============================================================
 
-    # 将 RAG 结果组装为【RAG 生成答案 + 参考资料 + 引用文档】。
-    # 检索分数只保留在 agents_output 中，不能注入回答模型的上下文。
-    # 这些内容将作为 {rag_context} 填入 KNOWLEDGE_AGENT_PROMPT
+
+
+
+
+
+
     rag_context = build_rag_context(
         answer=rag_result["answer"],
         source_text=source_text,
         source_doc_text=source_doc_text,
     )
 
-    # 以空 RAG 上下文计算 base_system_prompt 的 token 数
-    # 这是传给 BudgetManager 的 fixed_tokens：无论 RAG 结果如何都必须消耗的部分
+
+
     base_system_prompt = KNOWLEDGE_AGENT_PROMPT.format(
         rag_context=""
     )
 
-    # 计算完整 RAG 上下文的 token 数，作为 requested.rag 提交
+
     rag_token_count = knowledge_context_assembler.count_text(
         rag_context
     )
 
-    # BudgetManager.allocate() 内部：
-    #   1. available = 6000(input_limit) - fixed_tokens(base_prompt)
-    #   2. history_min = 600（最低保障）→ 先分配给历史
-    #   3. 按 priority 分配 rag 配额（knowledge profile 的 priority = ["rag"]）
-    #   4. 剩余空间回填给历史
+
+
+
+
+
     assembly = knowledge_context_assembler.build(
         state=state,
         system_prompt=base_system_prompt,
         requested={
-            "rag": rag_token_count,  # 请求将 RAG 内容全部装入
-            "tool": 0,               # KnowledgeAgent 不消费工具结果
+            "rag": rag_token_count,
+            "tool": 0,
         },
-        mode="standard",  # 保守模式：历史只占 60%，为 RAG 留更多空间
+        mode="standard",
     )
 
     allocation = assembly["allocation"]
 
-    # ==============================================================
-    # 阶段 5：RAG 内容截断 —— 按配额裁剪
-    # ==============================================================
 
-    # 如果 rag_token_count > allocation["rag_tokens"]，
-    # RAG 上下文会被截断，优先保留靠前的段落
-    # （rag_context 的内部顺序：RAG答案 → 参考资料 → 引用文档 → 分数，
-    #   越靠前的内容对 LLM 越有价值）
+
+
+
+
+
+
+
     limited_rag_context = (
         knowledge_context_assembler.truncate_text(
             rag_context,
@@ -416,25 +416,25 @@ def knowledge_agent(state: MetroAgentState) -> dict:
         )
     )
 
-    # 用截断后的 RAG 内容重新填入 prompt 模板
+
     system_prompt = KNOWLEDGE_AGENT_PROMPT.format(
         rag_context=limited_rag_context
     )
 
-    # ==============================================================
-    # 阶段 6：LLM 生成最终答案
-    # ==============================================================
 
-    # 消息结构（两层）：
-    #   [0] SystemMessage(提示词 + 截断后的 RAG 内容)  ← 知识约束
-    #   [1:] 对话历史消息                                ← 近期原文 + 旧轮摘要
+
+
+
+
+
+
     messages = [
         SystemMessage(content=system_prompt),
         *assembly["messages"],
     ]
 
-    # 调本地 Ollama Qwen2.5 7B 生成答案
-    # temperature 在 build_Ollama_qwenLLM 中已配置（通常 0.1-0.3，偏确定性）
+
+
     response = get_knowledge_agent_llm().invoke(messages)
     answer = _prefer_retrieval_answer(str(response.content), rag_result.get("answer"))
     retrieved_sources = [
@@ -449,15 +449,15 @@ def knowledge_agent(state: MetroAgentState) -> dict:
 
     return {
         "agents_output": {
-            "knowledge": answer,          # RAG 增强后的答案文本
-            "sources": source_doc_text,   # 引用文档名（供前端展示）
-            "sources_score": source_score,  # 检索分数（供内部质量调试）
+            "knowledge": answer,
+            "sources": source_doc_text,
+            "sources_score": source_score,
             "retrieved_sources": retrieved_sources,
             "index_build_id": rag_result["index_build_id"],
             "top_k": rag_result["top_k"],
             "retrieved_count": rag_result["retrieved_count"],
         },
-        # 上下文分配账单：记录本次各部分实际获得的 token 配额
+
         "context_allocations": {
             "knowledge": allocation,
         },

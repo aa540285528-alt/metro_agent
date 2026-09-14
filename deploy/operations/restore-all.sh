@@ -41,11 +41,8 @@ docker compose exec -T postgres \
 echo RESTORE_STEP=Chroma
 docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup:ro" app \
   python deploy/operations/safe-restore-tar.py swap-volume /backup/memory-chroma.tar.gz /var/lib/metro-agent/memory-chroma --expected-root current
-# The full knowledge volume is staged and switched only after every tar member
-# has been inspected.  It is never extracted over the live Chroma root.
 docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup:ro" -v knowledge_chroma_data:/restore app \
   python deploy/operations/safe-restore-tar.py replace-volume-contents /backup/knowledge-chroma.tar.gz /restore --expected-root chroma
-# Artifacts are append-only evidence.  Extraction never clears existing releases.
 docker compose run --rm --no-deps -v "$BACKUP_DIR:/backup:ro" knowledge-indexer sh -ceu \
   'python deploy/operations/safe-restore-tar.py merge-artifacts /backup/knowledge-artifacts.tar.gz /var/lib/metro-agent --expected-root knowledge-artifacts'
 

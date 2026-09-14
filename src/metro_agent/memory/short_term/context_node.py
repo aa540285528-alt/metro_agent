@@ -19,18 +19,18 @@
     → 写回 state (messages / conversation_context / current_round_* / agents_output)
 """
 
-from uuid import uuid4  # 为每轮对话生成全局唯一 round_id
+from uuid import uuid4
 
 from langchain_core.messages import HumanMessage
-from langgraph.types import Overwrite  # LangGraph 强制覆盖标记：确保 agents_output 重置为空而非合并
+from langgraph.types import Overwrite
 from metro_agent.observability.node_instrumentation import traced_node
 from metro_agent.memory.short_term.context_builder import ConversationContextBuilder
 from metro_agent.state import MetroAgentState
 
 
-# ----------------------------------------------------------------------
-# 轮次序号计算
-# ----------------------------------------------------------------------
+
+
+
 
 def get_next_round_number(
     state: MetroAgentState,
@@ -57,7 +57,7 @@ def get_next_round_number(
         for summary in state.get("conversation_summaries", [])
     ]
 
-    # 从尚未归档的近期消息中提取轮次序号
+
     for message in state.get("messages", []):
         round_number = message.additional_kwargs.get(
             "round_number"
@@ -69,11 +69,11 @@ def get_next_round_number(
     return max(round_numbers, default=0) + 1
 
 
-# ----------------------------------------------------------------------
-# 上下文构建节点
-# ----------------------------------------------------------------------
 
-# 全局上下文构建器实例（模块级单例，避免每次调用重复创建）
+
+
+
+
 context_builder = ConversationContextBuilder(max_rounds=6)
 
 
@@ -116,31 +116,31 @@ def build_conversation_context(
     user_input = state.get("user_input", "").strip()
     existing_messages = list(state.get("messages", []))
 
-    # 边界情况：无输入时不追加新消息，不分配轮次
+
     if not user_input:
         return {
             "conversation_context":
                 context_builder.build_text(existing_messages)
         }
 
-    # 生成轮次元数据
-    round_id = str(uuid4())                       # 本轮全局唯一标识
-    round_number = get_next_round_number(state)   # 本轮自增序号（跨归档/未归档消息统一计算）
 
-    # 包装 HumanMessage，附带到轮次追踪信息
-    # additional_kwargs 中的 round_id / round_number 用于：
-    #   - 压缩/归档时关联摘要与原始消息
-    #   - get_next_round_number 在下一轮中计算序号
+    round_id = str(uuid4())
+    round_number = get_next_round_number(state)
+
+
+
+
+
     current_message = HumanMessage(
         content=user_input,
-        id=f"{round_id}:human",  # LangChain 消息 ID，格式 "UUID:角色"
+        id=f"{round_id}:human",
         additional_kwargs={
             "round_id": round_id,
             "round_number": round_number,
         },
     )
 
-    # 历史消息 + 当前消息 → 截断 → 格式化
+
     context_text = context_builder.build_text(
         [*existing_messages, current_message]
     )
@@ -148,10 +148,10 @@ def build_conversation_context(
     return {
         "messages": [current_message],
         "conversation_context": context_text,
-        # 暴露当前轮次信息，供压缩任务和日志使用
+
         "current_round_id": round_id,
         "current_round_number": round_number,
-        # 新一轮开始，强制清空上一轮的 Agent 输出
+
         "agents_output": Overwrite(value={}),
         "context_allocations": Overwrite(value={}),
     }

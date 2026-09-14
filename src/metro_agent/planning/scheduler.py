@@ -32,7 +32,7 @@ Scheduler —— DAG 依赖调度器
 import sys
 from pathlib import Path
 
-# 将项目根目录加入 sys.path，以便导入 planning 模块
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from metro_agent.planning.models import ExecutionPlan, PlanStep, StepResult
@@ -102,31 +102,31 @@ def get_ready_steps(
         list[PlanStep]: 可以立即执行的步骤列表。
                         无 ready 步骤时返回空列表。
     """
-    # 收集所有已成功步骤的 ID
+
     completed_dependency_step_ids = get_success_step_ids(results)
 
     ready_steps: list[PlanStep] = []
 
     for step in plan.steps:
-        # ---- 条件 1：步骤必须处于 pending 状态 ----
-        # 如果步骤已经是 ready/running/success/failed 等，
-        # 说明它已经被处理过，不应再次调度
+
+
+
         if step.step_id in results:
             continue
         if step.status != "pending":
             continue
 
-        # ---- 条件 2：所有依赖步骤必须已完成且可供消费 ----
-        # all() 对空列表返回 True：
-        #   无依赖的步骤（step.dependencies == []）直接视为就绪
+
+
+
         dependencies_done = all(
             dep in completed_dependency_step_ids
             for dep in step.dependencies
         )
 
         if dependencies_done:
-            # 原地修改状态：防止下一轮调用 get_ready_steps 时
-            # 该步骤再次被选中（幂等性保证）
+
+
             step.status = "ready"
             ready_steps.append(step)
 

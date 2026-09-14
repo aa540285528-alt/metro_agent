@@ -23,20 +23,20 @@ RoundConversationSummarizer —— 单轮对话摘要器
     迭代式 f(旧摘要 + 新消息) → 新摘要，给 context_node 调用
 """
 
-from collections.abc import Sequence  # 泛型序列类型，接受 list/tuple 等
+from collections.abc import Sequence
 
 from langchain_core.messages import (
-    BaseMessage,   # 所有消息类型的基类（HumanMessage / AIMessage / ToolMessage）
-    HumanMessage,  # 用户消息，作为 LLM 的输入内容
-    SystemMessage, # 系统指令消息，设置 LLM 的行为约束
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
 )
 
 from metro_agent.config import (
-    build_Ollama_qwenLLM,  # 工厂函数：创建连接本地 Ollama 的 LLM 实例
-    ROUND_SUMMARY_PROMPT,   # 摘要系统提示词（≤100 字 + 只提炼关键信息）
+    build_Ollama_qwenLLM,
+    ROUND_SUMMARY_PROMPT,
 )
 from metro_agent.memory.short_term.context_builder import (
-    ConversationContextBuilder,  # 复用消息格式化器（round_messages → "角色:内容" 文本）
+    ConversationContextBuilder,
 )
 
 SUMMARY_TARGET_CHARS = 100
@@ -106,33 +106,33 @@ class RoundConversationSummarizer:
         Raises:
             ValueError: 摘要为空时抛出（Ollama 返回异常）。
         """
-        # --------------------------------------------------------------
-        # 步骤 1：格式化消息为纯文本
-        # 使用 ConversationContextBuilder 的 "角色:内容" 格式，
-        # 保证与 agent_context_assembler 中兜底原文的格式一致
-        # --------------------------------------------------------------
+
+
+
+
+
         text = self.formatter.format_messages(messages)
 
-        # --------------------------------------------------------------
-        # 步骤 2：调用本地 Ollama 生成摘要
-        # SystemMessage: 设定行为约束（见 config.ROUND_SUMMARY_PROMPT）
-        #   "你是一个对话压缩器，将一轮对话提炼为不超过100字的摘要..."
-        # HumanMessage: 传入格式化后的对话文本
-        # --------------------------------------------------------------
+
+
+
+
+
+
         response = self.llm.invoke([
             SystemMessage(content=ROUND_SUMMARY_PROMPT),
             HumanMessage(content=text),
         ])
 
-        # 提取 LLM 返回的文本内容，去除首尾空白
+
         summary = str(response.content).strip()
 
-        # --------------------------------------------------------------
-        # 步骤 3：校验摘要质量
-        # 两层检查确保摘要可用：
-        #   空摘要 → 模型可能崩溃或返回了非文本内容
-        #   超过硬上限 → 二次压缩，仍超长时截断兜底
-        # --------------------------------------------------------------
+
+
+
+
+
+
         if not summary:
             raise ValueError("Ollama返回空摘要")
 

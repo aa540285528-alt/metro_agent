@@ -18,8 +18,8 @@ ConversationSegmenter —— 对话分段器（基于 Token 预算）
    最旧 ←──────────────────────────────────────────→ 最新
 """
 
-from collections.abc import Sequence  # 消息序列的抽象类型
-import tiktoken                        # OpenAI 官方 token 计数库，精确计算文本 token 数
+from collections.abc import Sequence
+import tiktoken
 from langchain_core.messages import BaseMessage
 
 
@@ -31,9 +31,9 @@ class ConversationSegmenter:
         )
         self.encoding = tiktoken.get_encoding("cl100k_base")
 
-    # ------------------------------------------------------------------
-    # Token 计数
-    # ------------------------------------------------------------------
+
+
+
 
     def count_tokens(
         self,
@@ -59,14 +59,14 @@ class ConversationSegmenter:
 
         for message in messages:
             content = str(message.content)
-            total += 4  # 每条消息的元数据开销（角色标记等）
+            total += 4
             total += len(self.encoding.encode(content))
 
         return total
 
-    # ------------------------------------------------------------------
-    # 按轮分组
-    # ------------------------------------------------------------------
+
+
+
 
     def group_rounds(
         self,
@@ -93,28 +93,28 @@ class ConversationSegmenter:
         """
         message_list = list(messages)
 
-        # 找到所有 HumanMessage 的索引位置（轮次边界）
+
         human_indexes = [
             index
             for index, message in enumerate(message_list)
             if message.type == "human"
         ]
 
-        # 没有任何 HumanMessage（例如只有 system prompt），整段作为一轮
+
         if not human_indexes:
             return [message_list] if message_list else []
 
         rounds = []
 
         for position, human_index in enumerate(human_indexes):
-            # 每轮的起始索引：
-            #   - 第一轮从索引 0 开始（可能包含 HumanMessage 之前的 system 消息）
-            #   - 后续轮从当前 HumanMessage 的位置开始
+
+
+
             start = 0 if position == 0 else human_index
 
-            # 每轮的结束索引：
-            #   - 如果后面还有 HumanMessage，到下一个 HumanMessage 位置为止
-            #   - 否则到消息列表末尾
+
+
+
             if position + 1 < len(human_indexes):
                 end = human_indexes[position + 1]
             else:
@@ -125,9 +125,9 @@ class ConversationSegmenter:
         return rounds
 
 
-    # ------------------------------------------------------------------
-    # 工具方法
-    # ------------------------------------------------------------------
+
+
+
 
     @staticmethod
     def flatten(

@@ -24,23 +24,23 @@ Diagnosis Agent —— 故障诊断 Agent
 from langchain.messages import SystemMessage, HumanMessage
 
 from metro_agent.config import (
-    build_Chat_ZhiPuLLM_DIAGNOSIS,   # 工厂函数：创建智谱 GLM-4.6V 连接
-    DIAGNOSIS_AGENT_PROMPT,          # 诊断系统提示词（含输出格式约束）
-    TOOL_CONTEXT_MAX_ITEMS,          # 工具调用记录最多保留条数（默认 3）
-    TOOL_CONTEXT_MAX_RESULT_CHARS,   # 单条工具结果最大字符数（默认 2000）
+    build_Chat_ZhiPuLLM_DIAGNOSIS,
+    DIAGNOSIS_AGENT_PROMPT,
+    TOOL_CONTEXT_MAX_ITEMS,
+    TOOL_CONTEXT_MAX_RESULT_CHARS,
 )
 from metro_agent.memory.short_term.agent_context_assembler import (
-    AgentContextAssembler,  # 按 Agent 预算组装对话历史的上下文消息
+    AgentContextAssembler,
 )
 from metro_agent.memory.short_term.tool_context_builder import (
-    ToolContextBuilder,     # 从中心黑板提取并格式化工具调用记录
+    ToolContextBuilder,
 )
 from metro_agent.state import MetroAgentState
 from metro_agent.observability.agent_usage import LLM_USAGE_RECORDS_KEY, capture_response_usages
 
-# ============================================================
-# LLM 实例与上下文构建器（模块级单例，复用连接和配置）
-# ============================================================
+
+
+
 
 _diagnosis_agent_llm = None
 
@@ -52,14 +52,14 @@ def get_diagnosis_agent_llm():
         _diagnosis_agent_llm = build_Chat_ZhiPuLLM_DIAGNOSIS()
 
     return _diagnosis_agent_llm
-# 上下文组装器：从 messages 历史中按 diagnosis 的 token 预算
-# （24K 上下文窗口）提取最近对话，优先用摘要，摘要不够用原文
+
+
 diagnosis_context_assembler = AgentContextAssembler(
     agent_name="diagnosis"
 )
 
-# 工具上下文构建器：从中心黑板（state.tool_results）中提取
-# 最近的工具调用记录，截断并格式化为诊断参考文本
+
+
 diagnosis_tool_context_builder = ToolContextBuilder(
     max_items=TOOL_CONTEXT_MAX_ITEMS,
     max_result_chars=TOOL_CONTEXT_MAX_RESULT_CHARS,
@@ -72,9 +72,9 @@ def format_dependency_outputs(dependency_outputs: dict) -> str:
     return "\n\n".join(lines)
 
 
-# ============================================================
-# 故障诊断 Agent
-# ============================================================
+
+
+
 
 
 def diagnosis_agent(state: MetroAgentState) -> dict:
@@ -126,20 +126,20 @@ def diagnosis_agent(state: MetroAgentState) -> dict:
             （含 history_tokens / tool_tokens / rag_tokens 等，
              用于调试和监控上下文预算使用情况）
     """
-    # ==============================================================
-    # 阶段 1：构建辅助上下文（工具数据 + 知识依据）
-    # ==============================================================
+
+
+
 
     existing_tool_results = state.get("tool_results", {})
 
-    # 从中心黑板提取最近的工具调用记录，格式化为诊断参考文本
-    # 例如："调用ID：xxx\n工具：query_alarm\n参数：...\n结果：..."
+
+
     tool_context = diagnosis_tool_context_builder.build_text(
         existing_tool_results
     )
 
-    # KnowledgeAgent 若在当前链路中先执行，其结论作为知识依据注入诊断
-    # 例如："该告警关联到 3 号线信号系统，历史同类故障 12 起..."
+
+
     knowledge_context = str(
         state.get("agents_output", {}).get(
             "knowledge",
@@ -147,12 +147,12 @@ def diagnosis_agent(state: MetroAgentState) -> dict:
         )
     ).strip()
 
-    # ==============================================================
-    # 阶段 2：预算分配 —— 由 BudgetManager 决定各部分的 token 配额
-    # ==============================================================
 
-    # 预计算 tool 和 rag 内容的 token 数，作为 requested 需求提交给分配器
-    # 分配器会根据 profile 中的 priority 顺序和 max 上限决定实际配额
+
+
+
+
+
     tool_tokens = diagnosis_context_assembler.count_text(
         tool_context
     )
@@ -160,37 +160,37 @@ def diagnosis_agent(state: MetroAgentState) -> dict:
         knowledge_context
     )
 
-    # 模式选择：
-    #   extended: 有 tool 或 knowledge 内容时启用 → 历史预算因子 = 1.00
-    #   standard: 两者都为空时 → 历史预算因子 = 0.60（更保守，为输出留空间）
+
+
+
     context_mode = (
         "extended"
         if tool_context or knowledge_context
         else "standard"
     )
 
-    # AgentContextAssembler.build() 内部流程：
-    #   1. count_text(system_prompt) → fixed_tokens（固定消耗）
-    #   2. BudgetManager.allocate() → allocation（各区域配额）
-    #   3. 按 allocation.history_tokens 从 messages 中贪婪选择对话历史
-    #   4. 返回 {"messages": [...], "allocation": {...}}
+
+
+
+
+
     assembly = diagnosis_context_assembler.build(
         state=state,
         system_prompt=DIAGNOSIS_AGENT_PROMPT,
         requested={
-            "tool": tool_tokens,   # 请求分配给工具上下文的 token 数
-            "rag": knowledge_tokens,  # 请求分配给知识上下文的 token 数
+            "tool": tool_tokens,
+            "rag": knowledge_tokens,
         },
         mode=context_mode,
     )
     allocation = assembly["allocation"]
 
-    # ==============================================================
-    # 阶段 4：按配额截断辅助内容
-    # ==============================================================
 
-    # 将工具上下文截断到分配到的 tool_tokens 额度
-    # truncate_text 使用 tiktoken 精确截断，不会从多字节字符中间切断
+
+
+
+
+
     limited_tool_context = diagnosis_context_assembler.truncate_text(
         tool_context,
         allocation["tool_tokens"],
@@ -202,26 +202,26 @@ def diagnosis_agent(state: MetroAgentState) -> dict:
         )
     )
 
-    # ==============================================================
-    # 阶段 5：组装最终消息列表并推理
-    # ==============================================================
 
-    # 提取组装好的对话历史消息（近期原文 + 旧轮摘要）
+
+
+
+
     history_messages = assembly["messages"]
 
-    # 兜底：如果对话历史为空（极端情况，如首轮且无摘要），
-    # 至少把当前用户输入作为历史消息传给 LLM
+
+
     if not history_messages:
         history_messages = [
             HumanMessage(content=state["user_input"])
         ]
 
-    # 构建辅助上下文消息列表（Layer 2 + Layer 3）
-    # 每个辅助上下文用独立的 SystemMessage 包装，附带使用约束
+
+
     context_messages = []
 
-    # Layer 2：工具查询结果 —— 设备/告警的实际数据
-    # "只能依据其中实际存在的数据诊断" 防止 LLM 编造不存在的设备状态
+
+
     if limited_tool_context:
         context_messages.append(
             SystemMessage(
@@ -233,8 +233,8 @@ def diagnosis_agent(state: MetroAgentState) -> dict:
             )
         )
 
-    # Layer 3：KnowledgeAgent 结论 —— 知识库检索结果
-    # "不得扩展其中没有的事实" 防止 LLM 把检索结果当作灵感随意发挥
+
+
     if limited_knowledge_context:
         context_messages.append(
             SystemMessage(
@@ -251,11 +251,11 @@ def diagnosis_agent(state: MetroAgentState) -> dict:
     以下是前置步骤结果，请优先基于这些结果诊断：
     {formatted_dependency_outputs}
     """
-    # 最终消息结构（按 LLM 处理优先级排列）：
-    #   [0] SystemMessage(诊断提示词)      ← 行为约束，最高优先级
-    #   [1] SystemMessage(工具证据)        ← 可选，事实约束
-    #   [2] SystemMessage(知识依据)        ← 可选，知识约束
-    #   [3:] 对话历史                       ← Human/AI/System 消息序列
+
+
+
+
+
     messages = [
         SystemMessage(content=DIAGNOSIS_AGENT_PROMPT),
         SystemMessage(content=dependency_context),
@@ -263,20 +263,20 @@ def diagnosis_agent(state: MetroAgentState) -> dict:
         *history_messages,
     ]
 
-    # 调云端 GLM-4.6V 进行推理
+
     response = get_diagnosis_agent_llm().invoke(messages)
     answer = response.content
 
     state_update = {
-        # 诊断结果写入 agents_output，供计划聚合和观测使用。
-        # 和 response_node 记录到 messages 历史
+
+
         "agents_output": {
             "diagnosis": answer,
         },
-        # 记录本次上下文分配的详细账单，用于：
-        #   1. 调试 token 预算是否合理
-        #   2. 监控各 Agent 的上下文利用率
-        #   3. 发现预算配置问题（如某 Agent 频繁耗尽配额）
+
+
+
+
         "context_allocations": {
             "diagnosis": allocation,
         },

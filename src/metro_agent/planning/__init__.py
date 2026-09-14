@@ -34,9 +34,9 @@ DAG 执行计划，按依赖顺序并行/串行调度 Agent 执行。
     debug_node.py       — 调试输出节点（打印计划状态）
 """
 
-# ============================================================
-# 数据模型（供外部直接引用，无需 from metro_agent.planning.models import ...）
-# ============================================================
+
+
+
 from metro_agent.planning.models import (
     ExecutionPlan,
     PlanStep,
@@ -47,24 +47,24 @@ from metro_agent.planning.models import (
     utc_now_iso,
 )
 
-# ============================================================
-# 计划生成 & 校验节点（LangGraph 节点函数）
-# ============================================================
+
+
+
 from metro_agent.planning.planner_node import planner_node
 from metro_agent.planning.plan_validator_node import plan_validator_node
 from metro_agent.planning.validator import validate_plan, has_cycle
 
-# ============================================================
-# 调度 & 执行节点
-# ============================================================
+
+
+
 from metro_agent.planning.scheduler import get_ready_steps, get_success_step_ids
 from metro_agent.planning.parallel_routing import route_ready_steps
 from metro_agent.planning.worker_node import planning_worker_node, extract_step_output
 from metro_agent.planning.aggregate_node import planning_aggregate_node
 
-# ============================================================
-# 适配 & 辅助
-# ============================================================
+
+
+
 from metro_agent.planning.agent_adapter import (
     run_plan_step_agent,
     build_dependency_outputs,
@@ -73,11 +73,11 @@ from metro_agent.planning.agent_adapter import (
 from metro_agent.planning.factory import create_plan, create_event
 from metro_agent.planning.debug_node import planning_debug_end_node
 
-# ============================================================
-# 公开 API
-# ============================================================
+
+
+
 __all__ = [
-    # —— 数据模型 ——
+
     "ExecutionPlan",
     "PlanStep",
     "StepResult",
@@ -85,7 +85,7 @@ __all__ = [
     "PlanEvent",
     "ReviewDecision",
     "utc_now_iso",
-    # —— 管线节点 ——
+
     "planner_node",
     "plan_validator_node",
     "route_ready_steps",
@@ -93,17 +93,17 @@ __all__ = [
     "extract_step_output",
     "planning_aggregate_node",
     "planning_debug_end_node",
-    # —— 调度器 ——
+
     "get_ready_steps",
     "get_success_step_ids",
-    # —— 校验 ——
+
     "validate_plan",
     "has_cycle",
-    # —— 适配器 ——
+
     "run_plan_step_agent",
     "build_dependency_outputs",
     "AGENT_FUNCTIONS",
-    # —— 工厂函数 ——
+
     "create_plan",
     "create_event",
 ]

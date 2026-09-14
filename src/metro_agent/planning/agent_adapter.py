@@ -34,10 +34,10 @@ Agent 函数注册表（AGENT_FUNCTIONS）：
 import sys
 from pathlib import Path
 
-# 将项目根目录加入 sys.path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# 导入现有的 Agent 节点函数
+
 from metro_agent.agents import (
     diagnosis_agent,
     general_agent,
@@ -48,19 +48,19 @@ from metro_agent.planning.models import PlanStep
 from metro_agent.state import MetroAgentState
 
 
-# ============================================================
-# Agent 函数注册表
-#
-# key: step.agent 的字符串值（由 Planner LLM 生成）
-# value: agents/ 目录下对应的节点函数
-#
-# 两者之间的对应关系：
-#   Planner 输出 "realtime_agent" → RealtimeAgent.realtime_agent()
-#   Planner 输出 "diagnosis_agent" → DiagnosisAgent.diagnosis_agent()
-#
-# 如果 Planner 输出了不在注册表中的 agent 名称，
-# run_plan_step_agent() 会抛出 ValueError。
-# ============================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
 AGENT_FUNCTIONS = {
     "knowledge_agent": knowledge_agent,
     "realtime_agent": realtime_agent,
@@ -101,11 +101,11 @@ def build_dependency_outputs(
     """
     plan_results = state.get("plan_results", {})
 
-    # 从 plan_results 中按名称提取依赖步骤的输出
-    # 使用 dict 推导式 + if dep in plan_results 做防御性过滤——
-    # 如果某个依赖步骤还没有结果（理论上不会，因为 scheduler
-    # 已经确保依赖全部 success，但 plan_results 可能未及时更新），
-    # 安静地跳过而不是抛出 KeyError
+
+
+
+
+
     return {
         dep: plan_results[dep]
         for dep in step.dependencies
@@ -150,7 +150,7 @@ def run_plan_step_agent(
         ValueError: step.agent 不在 AGENT_FUNCTIONS 注册表中。
                     这通常说明 Planner LLM 生成了不合法的 agent 名称。
     """
-    # ---- 步骤 1：查找对应的 Agent 函数 ----
+
     agent_func = AGENT_FUNCTIONS.get(step.agent)
 
     if agent_func is None:
@@ -158,25 +158,25 @@ def run_plan_step_agent(
             f"未知 Agent: {step.agent}"
         )
 
-    # ---- 步骤 2 & 3：构建适配后的 state ----
-    # 复制原始 state 为 dict（Agent 函数接收 dict 而非 TypedDict），
-    # 避免直接在原始 state 上修改
+
+
+
     step_state = dict(state)
 
-    # 注入 PlanStep 序列化结果（Agent 如有需要可读取元数据）
+
     step_state["current_plan_step"] = step.model_dump(mode="json")
 
-    # 注入自然语言指令：告诉 Agent 当前步骤要做什么 + 期望输出什么
+
     step_state["planning_instruction"] = (
         f"当前计划步骤：{step.description}\n"
         f"期望输出：{step.expected_output}"
     )
 
-    # 注入前置步骤的输出（Agent 可据此复用已获取的数据）
+
     step_state["dependency_outputs"] = build_dependency_outputs(
         state=state,
         step=step,
     )
 
-    # ---- 步骤 4：调用 Agent 函数 ----
+
     return agent_func(step_state)

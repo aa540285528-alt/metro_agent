@@ -26,27 +26,27 @@ RedisCompressionQueue —— 基于 Redis 的可靠压缩任务队列
   metro:compression:result:{job_id}               → String [压缩结果 JSON]
 """
 
-import json  # 序列化/反序列化队列载荷
-from dataclasses import dataclass  # ReservedCompressionJob 数据容器
-from datetime import datetime, timezone  # 记录入队时间
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from langchain_core.messages import (
     BaseMessage,
-    messages_from_dict,  # 反序列化：dict → BaseMessage 列表
-    messages_to_dict,    # 序列化：BaseMessage 列表 → dict
+    messages_from_dict,
+    messages_to_dict,
 )
 from redis import Redis
 
 from metro_agent.config import (
-    SHORT_TERM_MEMORY_REDIS_URL,      # Redis 连接地址
-    SHORT_TERM_MEMORY_TTL_MINUTES,    # 队列数据的 TTL（分钟），超时自动清理
+    SHORT_TERM_MEMORY_REDIS_URL,
+    SHORT_TERM_MEMORY_TTL_MINUTES,
 )
 
 
-# ======================================================================
-# 数据结构
-# ======================================================================
+
+
+
 
 @dataclass
 class ReservedCompressionJob:
@@ -57,13 +57,13 @@ class ReservedCompressionJob:
       - raw_payload: 用于 ack/requeue 时的精确匹配（LREM 需要原始值）
       - payload:     用于读取任务元数据（job_id / round_id / source_ref 等）
     """
-    raw_payload: str           # JSON 字符串（与 Redis 中存储的完全一致）
-    payload: dict[str, Any]    # 解析后的字典，包含 job_id、round_id、source_ref 等
+    raw_payload: str
+    payload: dict[str, Any]
 
 
-# ======================================================================
-# 可靠压缩队列
-# ======================================================================
+
+
+
 
 class RedisCompressionQueue:
     """基于 Redis 的可靠压缩任务队列。
@@ -76,11 +76,11 @@ class RedisCompressionQueue:
     不会出现"弹出成功但备份失败"的中间状态。
     """
 
-    # Redis key 命名常量
-    PENDING_KEY = "metro:compression:pending"        # 待处理队列
-    PROCESSING_KEY = "metro:compression:processing"  # 处理中备份队列
-    SOURCE_PREFIX = "metro:compression:source"       # 原始消息存储前缀
-    RESULT_PREFIX = "metro:compression:result"       # 压缩结果存储前缀
+
+    PENDING_KEY = "metro:compression:pending"
+    PROCESSING_KEY = "metro:compression:processing"
+    SOURCE_PREFIX = "metro:compression:source"
+    RESULT_PREFIX = "metro:compression:result"
 
     def __init__(self):
         """初始化 Redis 连接。
@@ -92,14 +92,14 @@ class RedisCompressionQueue:
             SHORT_TERM_MEMORY_REDIS_URL,
             decode_responses=True,
         )
-        # TTL 统一转换为秒（Redis EXPIRE 以秒为单位）
+
         self.ttl_seconds = (
             SHORT_TERM_MEMORY_TTL_MINUTES * 60
         )
 
-    # ------------------------------------------------------------------
-    # 入队
-    # ------------------------------------------------------------------
+
+
+
 
     def enqueue(
         self,
@@ -130,24 +130,24 @@ class RedisCompressionQueue:
         job_id = job["job_id"]
         round_id = job["round_id"]
 
-        # 构造原始消息的存储 key
+
         source_ref = (
             f"{self.SOURCE_PREFIX}:"
             f"{thread_id}:{round_id}"
         )
 
-        # 原始消息载荷：序列化后单独存储
+
         source_payload = {
             "thread_id": thread_id,
             "round_id": round_id,
             "round_number": job["round_number"],
-            "messages": messages_to_dict(messages),  # LangChain 内置序列化
+            "messages": messages_to_dict(messages),
             "created_at": datetime.now(
                 timezone.utc
             ).isoformat(),
         }
 
-        # 队列载荷：只含元数据 + 指向原始消息的 source_ref
+
         queue_payload = {
             "job_id": job_id,
             "thread_id": thread_id,
@@ -157,7 +157,7 @@ class RedisCompressionQueue:
                 "base_summary_version",
                 0,
             ),
-            "source_ref": source_ref,  # 指向原始消息的指针
+            "source_ref": source_ref,
         }
 
         raw_queue_payload = json.dumps(
@@ -165,10 +165,10 @@ class RedisCompressionQueue:
             ensure_ascii=False,
         )
 
-        # Redis pipeline：将两个写操作打包为一次网络往返
+
         pipeline = self.client.pipeline()
 
-        # 写操作 1：存储原始消息（带 TTL 自动过期）
+
         pipeline.set(
             source_ref,
             json.dumps(
@@ -178,8 +178,8 @@ class RedisCompressionQueue:
             ex=self.ttl_seconds,
         )
 
-        # 写操作 2：LPUSH 将任务推入 pending 队列头部
-        # 配合 BRPOPLPUSH（从尾部弹出）实现 FIFO 先进先出
+
+
         pipeline.lpush(
             self.PENDING_KEY,
             raw_queue_payload,
@@ -189,9 +189,9 @@ class RedisCompressionQueue:
 
         return source_ref
 
-    # ------------------------------------------------------------------
-    # 预占任务（消费者侧）
-    # ------------------------------------------------------------------
+
+
+
 
     def reserve(
         self,
@@ -216,8 +216,8 @@ class RedisCompressionQueue:
             如果超时无任务则返回 None。
         """
         raw_payload = self.client.brpoplpush(
-            self.PENDING_KEY,       # 源队列（从尾部弹出）
-            self.PROCESSING_KEY,    # 目标队列（推入头部）
+            self.PENDING_KEY,
+            self.PROCESSING_KEY,
             timeout=timeout,
         )
 
@@ -229,9 +229,9 @@ class RedisCompressionQueue:
             payload=json.loads(raw_payload),
         )
 
-    # ------------------------------------------------------------------
-    # 原始消息加载
-    # ------------------------------------------------------------------
+
+
+
 
     def load_source(
         self,
@@ -258,7 +258,7 @@ class RedisCompressionQueue:
                 f"压缩原文不存在或已过期：{source_ref}"
             )
 
-        # 读取时刷新有效期（LRU 行为：热数据常驻，冷数据淘汰）
+
         self.client.expire(
             source_ref,
             self.ttl_seconds,
@@ -270,9 +270,9 @@ class RedisCompressionQueue:
             source_payload["messages"]
         )
 
-    # ------------------------------------------------------------------
-    # 结果存取
-    # ------------------------------------------------------------------
+
+
+
 
     def save_result(
         self,
@@ -324,9 +324,9 @@ class RedisCompressionQueue:
 
         return json.loads(raw_result)
 
-    # ------------------------------------------------------------------
-    # 确认 & 重新入队（任务生命周期管理）
-    # ------------------------------------------------------------------
+
+
+
 
     def acknowledge(
         self,
@@ -343,8 +343,8 @@ class RedisCompressionQueue:
         """
         self.client.lrem(
             self.PROCESSING_KEY,
-            1,                          # 只删除 1 个匹配项
-            reserved_job.raw_payload,   # 精确匹配原始 JSON 字符串
+            1,
+            reserved_job.raw_payload,
         )
 
     def requeue(
@@ -365,13 +365,13 @@ class RedisCompressionQueue:
         """
         pipeline = self.client.pipeline()
 
-        # 从 processing 中移除
+
         pipeline.lrem(
             self.PROCESSING_KEY,
             1,
             reserved_job.raw_payload,
         )
-        # 推回 pending 队列头部（优先重试）
+
         pipeline.lpush(
             self.PENDING_KEY,
             reserved_job.raw_payload,

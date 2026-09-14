@@ -201,7 +201,7 @@ class KnowledgeIndexer:
         build_id: str | None = None
         try:
             with PublicationLock(self.redis_client, PUBLICATION_LOCK_KEY) as publication_lock:
-                # Re-check after taking exclusive ownership: no mixed source tree is publishable.
+
                 source = source_provider()
                 if self._source_sha(source) != source_sha:
                     raise KnowledgeIndexerError("knowledge source changed during build preparation")

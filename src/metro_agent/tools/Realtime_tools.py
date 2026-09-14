@@ -33,20 +33,20 @@ def query_alarm_tool(
         system:str
 )->dict:
     """查询相关路线、站点、系统下的告警"""
-    # 将传入的参数去除首尾空格（strip()）后，组装成字典，作为 HTTP 请求的查询参数（Query Parameters）
+
     query = {
         "line": line.strip(),
         "station": station.strip(),
         "system": normalize_system(system)
     }
-    # 向 {WIREMOCK_BASE_URL}/alarm 发起 GET 请求，附带刚才组装的 query 参数，并设置 timeout=5（5秒超时），即如果服务端5秒内未响应将抛出超时异常。
+
     try:
         response = requests.get(
         f"{_alarm_base_url()}/api/alarms", 
         params=query,
         timeout=5
     )
-        # 响应码非 2xx 时，抛出异常
+
         response.raise_for_status()
         alarms = response.json()
         if not isinstance(alarms, list):

@@ -10,7 +10,7 @@
 """
 import sys
 from pathlib import Path
-# 确保能导入同级的 memory_system 模块
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from collections.abc import Sequence
 from metro_agent.config import SHORT_TERM_MEMORY_LIMIT
@@ -69,18 +69,18 @@ class ConversationContextBuilder:
         if not message_list:
             return []
 
-        # 找到所有 human 消息的位置，每一条 human 代表一轮对话的起点
+
         human_indexes = [
             index
             for index, message in enumerate(message_list)
             if message.type == "human"
         ]
 
-        # 轮次数未超限，保留全部
+
         if len(human_indexes) <= self.max_rounds:
             return message_list
 
-        # 取最后 max_rounds 个 human 消息中最早的一条作为截断起点
+
         start_index = human_indexes[-self.max_rounds]
         return message_list[start_index:]
 
