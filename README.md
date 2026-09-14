@@ -11,7 +11,7 @@ Metro Agent 是面向**地铁通信运维**场景的多 Agent 知识助手，提
 
 本项目的目标不是“把文件上传后直接问答”，而是在内部运维场景中提供一条可审计、可验证、可回滚的知识服务链路：管理员上传资料，系统校验并构建草稿，管理员确认后才发布为可查询版本；普通用户只能查询已发布知识。
 
-真实 Agent 验收中，路径和安全指标已达到当前门槛；语义指标仍未通过：`answer_relevance=0.8635`、`answer_accuracy=0.7235`，均低于 `0.9`。因此当前版本**不算模型质量验收通过**，不得在验收报告中改写为“模型质量已达标”。详细评测说明见 [docs/evaluation.md](docs/evaluation.md)。
+真实 Agent 验收中，路径和安全指标已达到当前门槛；语义指标仍未通过：`answer_relevance=0.8635`、`answer_accuracy=0.7235`，均低于 `0.9`。因此当前版本**不算模型质量验收通过**，不得在验收报告中改写为“模型质量已达标”。
 
 ## 核心能力
 
@@ -47,7 +47,7 @@ flowchart LR
 
 运行时读写路径严格分离：Web 应用不持有 Docker socket、shell 权限或 Chroma 写权限；它只在管理员鉴权后创建固定类型的受控任务。发布 Worker 才拥有 staging、artifact 与 Chroma backend 的写入权限；应用查询只能经过知识只读代理读取当前已发布版本。
 
-完整技术说明见 [架构概览](docs/architecture/overview.md)。
+完整技术说明以本 README 的部署、安全、数据隔离和知识发布章节为准。
 
 ## 可复制的内部试点部署
 
@@ -115,7 +115,7 @@ flowchart LR
 
 先执行协调备份，再使用 `deploy/operations/legacy-owner-preview.sql` 做只读预览。预览事务固定 `ROLLBACK` 并报告精确 `candidate_count`；此后进入**人工停点**，审批人填写 `EXPECTED_COUNT` 和备份引用，才能运行 `legacy-owner-apply.sql`。脚本锁定候选表并验证更新影响数，任何影响数不一致都会中止。不要全量迁移裸数字 owner，也不要把 PostgreSQL 与 `memory_chroma_db` 的映射分别猜测。
 
-完整可执行命令、Chroma 原子目录切换、Redis checkpoint 处理和回滚要求见 [旧 Owner 迁移操作手册](docs/operations/legacy-owner-migration.md)。协调流程必须同时保留长期记忆备份，并在验收单记录长期记忆回滚证据。
+协调流程必须同时保留长期记忆备份，并在验收单记录长期记忆回滚证据。
 
 ## 运维、恢复与质量验证
 
@@ -132,7 +132,7 @@ flowchart LR
 
 ### 身份迁移中断恢复
 
-MySQL DDL 隐式提交。auth-migrate 失败会继续阻断 `app`。执行 `deploy/operations/inspect-mysql-partial-ddl.sh` 保存 Alembic 与 `information_schema` 证据；禁止盲目 `stamp`。空身份库可经审批删除专用空身份库重建，已有身份数据必须由 DBA 审核补偿迁移。完整处置见 [MySQL Alembic 部分 DDL 恢复手册](docs/operations/mysql-alembic-partial-ddl-recovery.md)。
+MySQL DDL 隐式提交。auth-migrate 失败会继续阻断 `app`。执行 `deploy/operations/inspect-mysql-partial-ddl.sh` 保存 Alembic 与 `information_schema` 证据；禁止盲目 `stamp`。空身份库可经审批删除专用空身份库重建，已有身份数据必须由 DBA 审核补偿迁移。
 
 ### MySQL TLS 与证书轮换
 
@@ -142,7 +142,7 @@ MySQL DDL 隐式提交。auth-migrate 失败会继续阻断 `app`。执行 `depl
 
 ### 一致性备份、恢复与镜像回滚
 
-使用 `deploy/operations/backup-all.sh` 协调执行 `mysqldump --single-transaction`、`pg_dump`、Chroma 快照和 Redis `SAVE`。知识发布将 Chroma 卷和 artifact 卷作为单一版本化发布单元：备份在 `knowledge:publication` 锁预检后归档 `knowledge-chroma.tar.gz` 与 `knowledge-artifacts.tar.gz` 并写入 `SHA256SUMS`；恢复会先验证 registry/pointer/validated descriptor，再启动应用。release 和 artifact 是审计证据，默认永久保留，**不自动清理**。备份介质的静态加密、密钥保管和保留期限由备份目标负责。`restore-all.sh` 固定按 **MySQL → PostgreSQL → Chroma → Redis** 恢复，并比较两个 Alembic revision、owner-counts 和 `/api/ready`。`rollback-image.sh` 只接受完整 `METRO_AGENT_IMAGE=...@sha256:...`，使用 `--no-build` 回滚镜像。可执行命令和中止条件见 [协调备份、恢复与镜像回滚手册](docs/operations/coordinated-backup-restore.md)。
+使用 `deploy/operations/backup-all.sh` 协调执行 `mysqldump --single-transaction`、`pg_dump`、Chroma 快照和 Redis `SAVE`。知识发布将 Chroma 卷和 artifact 卷作为单一版本化发布单元：备份在 `knowledge:publication` 锁预检后归档 `knowledge-chroma.tar.gz` 与 `knowledge-artifacts.tar.gz` 并写入 `SHA256SUMS`；恢复会先验证 registry/pointer/validated descriptor，再启动应用。release 和 artifact 是审计证据，默认永久保留，**不自动清理**。备份介质的静态加密、密钥保管和保留期限由备份目标负责。`restore-all.sh` 固定按 **MySQL → PostgreSQL → Chroma → Redis** 恢复，并比较两个 Alembic revision、owner-counts 和 `/api/ready`。`rollback-image.sh` 只接受完整 `METRO_AGENT_IMAGE=...@sha256:...`，使用 `--no-build` 回滚镜像。
 
 ### 知识发布恢复演练
 
@@ -156,11 +156,8 @@ MySQL DDL 隐式提交。auth-migrate 失败会继续阻断 `app`。执行 `depl
 - 真实工具的细粒度权限、写操作二次确认、统一熔断和敏感参数治理不在本次身份改造范围。
 - Langfuse 不替换本地业务 Trace。未来可作为外部 LLMOps 补充 Trace、Prompt、数据集与持续评测，但接入前必须确定字段脱敏、数据保留、网络边界和故障降级策略。
 
-## 文档与贡献
+## 贡献与安全
 
-- [架构概览](docs/architecture/overview.md)
-- [模型评测说明](docs/evaluation.md)
-- [内部试点认证验收](docs/operations/internal-pilot-auth-acceptance.md)
 - [安全披露政策](SECURITY.md)
 - [贡献指南](CONTRIBUTING.md)
 - [许可证](LICENSE)
