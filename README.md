@@ -1,16 +1,59 @@
 # Metro Agent
 
-Metro Agent 是面向地铁通信运维场景的多 Agent 助手。本仓库包含多 Agent 编排、RAG、实时工具、历史会话、本地 Trace 与离线评测基础，以及用于小范围内部使用的用户名密码认证。
+[![CI](https://github.com/aa540285528-alt/metro_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/aa540285528-alt/metro_agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-当前交付定位是**单组织私有化内部试点**，不是通用 SaaS，也不宣称已经达到正式生产交付标准。公开仓库只包含源码、合成样例、确定性测试和部署说明，不包含生产密钥、真实运维记录、会话数据或知识索引。
+Metro Agent 是面向**地铁通信运维**场景的多 Agent 知识助手，提供受治理的 RAG、多 Agent 编排、实时工具、历史会话与离线评测能力，并支持小范围内部用户的账号认证与数据隔离。
 
-## 当前质量结论
+项目当前定位是**单组织私有化内部试点**：它不是通用 SaaS，也不宣称已经达到正式生产交付标准。公开仓库只包含源码、合成样例、确定性测试和部署说明；不包含生产密钥、真实运维记录、会话数据或知识索引。
 
-真实 Agent 验收中，路径和安全指标已达到当前门槛，但语义指标仍未通过：`answer_relevance=0.8635`、`answer_accuracy=0.7235`，两者都低于 `0.9`。因此当前版本**不算模型质量验收通过**，不得在验收报告中改写成“模型质量已达标”。
+## 项目交付边界与当前质量
+
+本项目的目标不是“把文件上传后直接问答”，而是在内部运维场景中提供一条可审计、可验证、可回滚的知识服务链路：管理员上传资料，系统校验并构建草稿，管理员确认后才发布为可查询版本；普通用户只能查询已发布知识。
+
+真实 Agent 验收中，路径和安全指标已达到当前门槛；语义指标仍未通过：`answer_relevance=0.8635`、`answer_accuracy=0.7235`，均低于 `0.9`。因此当前版本**不算模型质量验收通过**，不得在验收报告中改写为“模型质量已达标”。详细评测说明见 [docs/evaluation.md](docs/evaluation.md)。
+
+## 核心能力
+
+- **多 Agent 协作**：包含通用、诊断、知识与实时工具 Agent，保留会话历史、本地 Trace 与离线评测基础。
+- **受治理知识库**：上传、校验、显式发布、版本记录、查询与回滚分离；草稿不会直接进入线上检索库。
+- **内部账号与最小权限**：无自注册；管理员创建用户、分配角色、禁用账号或重置密码，且所有管理动作审计留痕。
+- **服务端数据隔离**：用户身份从 Cookie 解析，客户端不能提交 `user_id` 改变会话、长期记忆或业务数据归属。
+- **私有化部署与恢复**：Docker Compose、Caddy HTTPS、健康检查、数据库迁移、协调备份、受控恢复与镜像回滚。
+- **可验证交付**：GitHub Actions 执行代码检查、离线测试、镜像构建、MySQL 集成测试与密钥扫描。
+
+## 系统架构
+
+```mermaid
+flowchart LR
+    user[内部用户浏览器] --> caddy[Caddy / HTTPS]
+    caddy --> app[FastAPI + LangGraph]
+
+    app --> agents[多 Agent 编排\n知识 / 诊断 / 通用 / 实时工具]
+    app --> auth[(MySQL\n账号、会话摘要、审计)]
+    app --> history[(PostgreSQL\n会话、Trace、评测元数据)]
+    app --> checkpoint[(Redis\nCheckpoint、发布锁)]
+    app --> readProxy[知识只读代理]
+    readProxy --> artifacts[已发布 Artifact]
+    readProxy --> chroma[(Chroma\n已发布知识索引)]
+
+    admin[管理员] --> adminUi[同源知识管理入口]
+    adminUi --> draft[草稿上传与校验]
+    draft --> worker[单实例发布 Worker]
+    worker --> artifacts
+    worker --> chroma
+    worker --> release[版本 Registry / 发布记录]
+```
+
+运行时读写路径严格分离：Web 应用不持有 Docker socket、shell 权限或 Chroma 写权限；它只在管理员鉴权后创建固定类型的受控任务。发布 Worker 才拥有 staging、artifact 与 Chroma backend 的写入权限；应用查询只能经过知识只读代理读取当前已发布版本。
+
+完整技术说明见 [架构概览](docs/architecture/overview.md)。
 
 ## 可复制的内部试点部署
 
-前置条件：Docker Engine、Docker Compose v2、Caddy，以及仅向受控内部网络开放 HTTPS 的服务器。部署配置的唯一权威来源是部署目录中的一个 `.env`，例如 `D:\MetroAgent\pilot\.env`；不要使用源码根目录、worktree 或其他环境的 `.env`。不要让同一个 Compose 项目名的数据卷与另一组数据库密码组合复用。
+前置条件：Docker Engine、Docker Compose v2、Caddy，以及仅向受控内部网络开放 HTTPS 的服务器。
+
+部署配置的唯一权威来源是部署目录中的一个 `.env`，例如 `D:\MetroAgent\pilot\.env`；不要使用源码根目录、worktree 或其他环境的 `.env`。不要让同一个 Compose 项目名的数据卷与另一组数据库密码组合复用。
 
 1. 从 `.env.example` 创建该唯一配置文件，不要提交它。为 `POSTGRES_PASSWORD`、`AUTH_MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD` 分别生成独立的 URL 安全高熵值；为 `AUTH_SESSION_PEPPER` 生成至少 32 字节随机值。`MODEL_DIR` 必须指向含 `bge-m3/`、`bge-reranker/` 的宿主机模型目录；`KNOWLEDGE_SOURCE_DIR` 仅供受控 indexer 使用；`KNOWLEDGE_PUBLISHER_INTERNAL_BEARER_SECRET` 只用于 app 与 publisher 的内部认证。`APP_HOST_PORT` 是 app 的 loopback HTTP 端口，默认 `8000`；`COMPOSE_PROJECT_NAME` 固定为 `metro-agent-pilot`。所有这些值都不得输出到日志或验收记录。
 
@@ -36,7 +79,7 @@ Metro Agent 是面向地铁通信运维场景的多 Agent 助手。本仓库包�
 
 4. 内部访问必须通过 HTTPS。将 `.env` 中的 `AUTH_COOKIE_SECURE=true`，并为 Caddy 进程配置同一权威配置中的非秘密 `PILOT_FQDN` 与 `APP_HOST_PORT`。以 [`deploy/proxy/Caddyfile.example`](deploy/proxy/Caddyfile.example) 启动 Caddy；它终结 TLS 并仅反向代理至 `127.0.0.1:APP_HOST_PORT`。浏览器验收必须确认 `Secure`、`HttpOnly`、`SameSite=Lax` Cookie。Compose 从不公开 MySQL、PostgreSQL、Redis、Chroma 或 publisher 端口。
 
-## 账号管理
+## 账号管理与数据隔离
 
 系统采用管理员预置账号，**无自注册**。管理员登录后可通过同源管理接口执行以下操作：
 
@@ -45,8 +88,6 @@ Metro Agent 是面向地铁通信运维场景的多 Agent 助手。本仓库包�
 - `PATCH /api/admin/users/{id}`：禁用/启用、改密或修改角色；改密和禁用会撤销活动会话。
 
 写接口要求有效的管理员 Cookie。浏览器请求存在 `Origin` 时，服务端将其与请求基准地址解析为 scheme、hostname 和有效端口，必须规范化后同源；缺失 `Origin` 时允许受控的内部 CLI 调用。应用不直接解析也不信任 `X-Forwarded-For`，反向代理必须覆盖客户端传入的转发头，并只从受信代理向应用转发。除此之外，不允许管理员自降级或自禁用，也不允许禁用或降级最后一个活动管理员。操作会写入 MySQL 审计表；密码使用 Argon2id 哈希，原始会话令牌不落库。
-
-## 数据隔离
 
 | 存储 | 数据与边界 |
 |---|---|
@@ -66,9 +107,7 @@ Metro Agent 是面向地铁通信运维场景的多 Agent 助手。本仓库包�
 
 草稿原 ZIP、受控解包清单、SHA-256、校验报告、不可变 release、chunk artifact、发布任务和管理员审计记录均**永久保留**，不设自动清理任务。审计至少包含管理员身份、动作、draft/release ID、原始文件名、SHA-256、时间、结果、失败摘要和回滚原因；不得由浏览器提交或伪造 `operator`、路径、collection 名或命令。
 
-运行时严格分离读写路径：Web 应用只在管理员鉴权后写入固定类型的受控任务（`validate_draft`、`publish_draft`、`rollback_release`、`get_status`），不持有 Docker socket、shell 权限或 Chroma 连接；单实例发布 worker 才拥有 staging 的读写权限、artifact 写权限、Chroma backend 网络和 Redis 发布锁。应用只经 `knowledge-read-proxy` 查询当前已发布版本；代理仅以只读方式读取 artifact，并拒绝草稿、失败版本、历史 collection 和所有 Chroma 写请求。
-
-回滚仅能由管理员对已有历史 release 发起并填写原因；worker 在同一 Redis 发布锁下原子切换 registry 指针，审计结果。失败、锁冲突或重启期间都不得改变 current release，正在执行的读取可以完成旧版本查询，但单个请求不能混用版本。`knowledge-admin.sh`/`knowledge-admin.ps1` 等包装器只保留给部署和事故处置，固定允许的管理子命令不得由 HTTP 请求、浏览器输入或普通日常操作调用。
+回滚仅能由管理员对已有历史 release 发起并填写原因；Worker 在同一 Redis 发布锁下原子切换 registry 指针并审计结果。失败、锁冲突或重启期间都不得改变 current release，正在执行的读取可以完成旧版本查询，但单个请求不能混用版本。`knowledge-admin.sh`/`knowledge-admin.ps1` 等包装器只保留给部署和事故处置，固定允许的管理子命令不得由 HTTP 请求、浏览器输入或普通日常操作调用。
 
 ## Legacy Owner 显式迁移
 
@@ -76,19 +115,24 @@ Metro Agent 是面向地铁通信运维场景的多 Agent 助手。本仓库包�
 
 先执行协调备份，再使用 `deploy/operations/legacy-owner-preview.sql` 做只读预览。预览事务固定 `ROLLBACK` 并报告精确 `candidate_count`；此后进入**人工停点**，审批人填写 `EXPECTED_COUNT` 和备份引用，才能运行 `legacy-owner-apply.sql`。脚本锁定候选表并验证更新影响数，任何影响数不一致都会中止。不要全量迁移裸数字 owner，也不要把 PostgreSQL 与 `memory_chroma_db` 的映射分别猜测。
 
-完整可执行命令、Chroma 原子目录切换、Redis checkpoint 处理和回滚要求见 `docs/operations/legacy-owner-migration.md`。
-协调流程必须同时保留长期记忆备份，并在验收单记录长期记忆回滚证据。
+完整可执行命令、Chroma 原子目录切换、Redis checkpoint 处理和回滚要求见 [旧 Owner 迁移操作手册](docs/operations/legacy-owner-migration.md)。协调流程必须同时保留长期记忆备份，并在验收单记录长期记忆回滚证据。
 
-## 运维基线
+## 运维、恢复与质量验证
 
 - **健康与迁移**：`/api/health` 是 liveness，`/api/ready` 会实际执行两次 `SELECT 1` 和 Redis `PING`；任一依赖失败返回不含 DSN 的 `503`。监控容器健康状态和两个一次性迁移作业，每次发布记录主库与身份库 revision。
 - **秘密与日志**：`.env` 仅限部署账号读取，定期轮换数据库密码。轮换 `AUTH_SESSION_PEPPER` 会使全部现有会话失效。日志和外部观测不得包含密码、原始 Cookie、完整工具敏感参数。
 - **HTTPS**：正式环境必须由可信反向代理终止 TLS，设置 `AUTH_COOKIE_SECURE=true`，限制来源、请求体和访问日志，并验证 Cookie 属性。
-- **验证**：离线执行 `python -m pytest -m "not live and not integration"`。CI 显式提供唯一 `AUTH_MYSQL_TEST_RUN_ID` 和完全匹配的 `AUTH_MYSQL_TEST_DATABASE`；测试只接收连接系统库 `mysql` 的 admin URL，并写入 run ID、数据库名、随机 token 三元所有权标记。只有三者精确匹配才允许 downgrade/drop。
+- **离线验证**：开发与 CI 使用以下命令；它不访问真实模型 API，也不运行集成测试：
+
+  ```bash
+  python -m pytest -m "not live and not integration" -q
+  ```
+
+- **CI 覆盖范围**：Ruff 静态检查、离线测试、Docker 镜像构建、专用 MySQL 集成测试与 Gitleaks 密钥扫描。MySQL 集成测试显式提供唯一 `AUTH_MYSQL_TEST_RUN_ID` 和完全匹配的 `AUTH_MYSQL_TEST_DATABASE`；测试只接收连接系统库 `mysql` 的 admin URL，并写入 run ID、数据库名、随机 token 三元所有权标记。只有三者精确匹配才允许 downgrade/drop。
 
 ### 身份迁移中断恢复
 
-MySQL DDL 隐式提交。auth-migrate 失败会继续阻断 `app`。执行 `deploy/operations/inspect-mysql-partial-ddl.sh` 保存 Alembic 与 `information_schema` 证据；禁止盲目 `stamp`。空身份库可经审批删除专用空身份库重建，已有身份数据必须由 DBA 审核补偿迁移。完整处置见 `docs/operations/mysql-alembic-partial-ddl-recovery.md`。
+MySQL DDL 隐式提交。auth-migrate 失败会继续阻断 `app`。执行 `deploy/operations/inspect-mysql-partial-ddl.sh` 保存 Alembic 与 `information_schema` 证据；禁止盲目 `stamp`。空身份库可经审批删除专用空身份库重建，已有身份数据必须由 DBA 审核补偿迁移。完整处置见 [MySQL Alembic 部分 DDL 恢复手册](docs/operations/mysql-alembic-partial-ddl-recovery.md)。
 
 ### MySQL TLS 与证书轮换
 
@@ -98,7 +142,7 @@ MySQL DDL 隐式提交。auth-migrate 失败会继续阻断 `app`。执行 `depl
 
 ### 一致性备份、恢复与镜像回滚
 
-使用 `deploy/operations/backup-all.sh` 协调执行 `mysqldump --single-transaction`、`pg_dump`、Chroma 快照和 Redis `SAVE`。知识发布将 Chroma 卷和 artifact 卷作为单一版本化发布单元：备份在 `knowledge:publication` 锁预检后归档 `knowledge-chroma.tar.gz` 与 `knowledge-artifacts.tar.gz` 并写入 `SHA256SUMS`；恢复会先验证 registry/pointer/validated descriptor，再启动应用。release 和 artifact 是审计证据，默认永久保留，**不自动清理**。备份介质的静态加密、密钥保管和保留期限由备份目标负责。`restore-all.sh` 固定按 **MySQL -> PostgreSQL -> Chroma -> Redis** 恢复，并比较两个 Alembic revision、owner-counts 和 `/api/ready`。`rollback-image.sh` 只接受完整 `METRO_AGENT_IMAGE=...@sha256:...`，使用 `--no-build` 回滚镜像。可执行命令和中止条件见 `docs/operations/coordinated-backup-restore.md`。
+使用 `deploy/operations/backup-all.sh` 协调执行 `mysqldump --single-transaction`、`pg_dump`、Chroma 快照和 Redis `SAVE`。知识发布将 Chroma 卷和 artifact 卷作为单一版本化发布单元：备份在 `knowledge:publication` 锁预检后归档 `knowledge-chroma.tar.gz` 与 `knowledge-artifacts.tar.gz` 并写入 `SHA256SUMS`；恢复会先验证 registry/pointer/validated descriptor，再启动应用。release 和 artifact 是审计证据，默认永久保留，**不自动清理**。备份介质的静态加密、密钥保管和保留期限由备份目标负责。`restore-all.sh` 固定按 **MySQL → PostgreSQL → Chroma → Redis** 恢复，并比较两个 Alembic revision、owner-counts 和 `/api/ready`。`rollback-image.sh` 只接受完整 `METRO_AGENT_IMAGE=...@sha256:...`，使用 `--no-build` 回滚镜像。可执行命令和中止条件见 [协调备份、恢复与镜像回滚手册](docs/operations/coordinated-backup-restore.md)。
 
 ### 知识发布恢复演练
 
@@ -112,4 +156,11 @@ MySQL DDL 隐式提交。auth-migrate 失败会继续阻断 `app`。执行 `depl
 - 真实工具的细粒度权限、写操作二次确认、统一熔断和敏感参数治理不在本次身份改造范围。
 - Langfuse 不替换本地业务 Trace。未来可作为外部 LLMOps 补充 Trace、Prompt、数据集与持续评测，但接入前必须确定字段脱敏、数据保留、网络边界和故障降级策略。
 
-完整架构见 `docs/architecture/overview.md`，试点验收记录使用 `docs/operations/internal-pilot-auth-acceptance.md`。
+## 文档与贡献
+
+- [架构概览](docs/architecture/overview.md)
+- [模型评测说明](docs/evaluation.md)
+- [内部试点认证验收](docs/operations/internal-pilot-auth-acceptance.md)
+- [安全披露政策](SECURITY.md)
+- [贡献指南](CONTRIBUTING.md)
+- [许可证](LICENSE)
