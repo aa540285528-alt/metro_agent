@@ -266,31 +266,6 @@ services:
         condition: service_healthy
     restart: "no"
 
-  knowledge-e2e:
-    image: ${METRO_AGENT_IMAGE:-metro-agent:local}
-    command: ["python", "-m", "metro_agent.tools.knowledge_indexer", "build-and-publish"]
-    profiles: ["knowledge-e2e"]
-    environment:
-      CHROMA_HOST: chroma
-      CHROMA_PORT: "8000"
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      KNOWLEDGE_PATH: /knowledge/source
-      KNOWLEDGE_ARTIFACT_ROOT: /var/lib/metro-agent/knowledge-artifacts
-      KNOWLEDGE_E2E: "1"
-      KNOWLEDGE_EMBEDDER: deterministic-test-embedder
-      METRO_AGENT_ENV: development
-    volumes:
-      - ./fixtures/knowledge-e2e:/knowledge/source:ro
-      - knowledge_artifact_data:/var/lib/metro-agent/knowledge-artifacts
-    networks: [knowledge_backend]
-    depends_on:
-      redis:
-        condition: service_healthy
-      chroma:
-        condition: service_started
-    restart: "no"
-
   egress-gateway:
     image: ubuntu/squid:6.6-24.04_beta
     command: ["squid", "-N", "-f", "/etc/squid/squid.conf"]

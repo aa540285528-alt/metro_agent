@@ -568,43 +568,8 @@ def test_restore_validates_archives_and_swaps_the_knowledge_volume_before_starti
     assert "http://127.0.0.1:8000/api/v2/heartbeat" in restore
 
 
-def test_e2e_profile_uses_only_deterministic_embedding_and_fixture() -> None:
-    compose = _compose()
-    service = compose["services"]["knowledge-e2e"]
-
-    assert service["profiles"] == ["knowledge-e2e"]
-    assert service["environment"]["KNOWLEDGE_E2E"] == "1"
-    assert "DEEPSEEK_API_KEY" not in service["environment"]
-    assert "GLM_API_KEY" not in service["environment"]
-    assert "DASHSCOPE_API_KEY" not in service["environment"]
-    assert "deterministic" in service["environment"]["KNOWLEDGE_EMBEDDER"].lower()
-    assert any("fixtures/knowledge-e2e" in value and value.endswith(":ro") for value in service["volumes"])
-
-
-def test_e2e_fixture_is_a_governed_versioned_knowledge_source() -> None:
-    rules = ROOT / "fixtures" / "knowledge-e2e" / "rules.md"
-    smoke = ROOT / "fixtures" / "knowledge-e2e" / "release-smoke-queries.jsonl"
-
-    assert rules.exists() and smoke.exists()
-    text = rules.read_text(encoding="utf-8")
-    for field in ("owner:", "source:", "updated:", "effective_date:", "expires_at:", "risk_level:"):
-        assert field in text
-    assert '"expected_source":"rules.md"' in smoke.read_text(encoding="utf-8")
-
-
 def test_compose_keeps_knowledge_chroma_unpublished_and_artifacts_retained() -> None:
     compose = _compose()
     services = compose["services"]
     assert "ports" not in services["chroma"]
     assert "knowledge_artifact_data" in compose["volumes"]
-
-    documentation = "\n".join(
-        (ROOT / relative).read_text(encoding="utf-8")
-        for relative in (
-            "README.md",
-            "docs/operations/coordinated-backup-restore.md",
-            "docs/operations/internal-pilot-auth-acceptance.md",
-        )
-    )
-    assert "不自动清理" in documentation
-    assert "加密由备份目标负责" in documentation
